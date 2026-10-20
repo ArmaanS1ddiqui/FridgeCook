@@ -74,7 +74,7 @@ export default function SettingsScreen() {
           </Text>
         </View>
         <Text variant="bodySmall" style={{ color: theme.colors.outlineVariant, marginTop: 12, textAlign: 'center' }}>
-          FridgeCook v1.0.1 — All data stored locally
+          FridgeCook v1.0.2 — All data stored locally
         </Text>
       </View>
     </ScrollView>
