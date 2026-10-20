@@ -1,11 +1,25 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { PaperProvider } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { lightTheme, darkTheme } from '../src/constants/theme';
 import { getDatabase } from '../src/database/schema';
 import { useSettingsStore } from '../src/stores/settingsStore';
-import { View, ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, useColorScheme, Platform } from 'react-native';
+import * as Updates from 'expo-updates';
+
+async function checkForUpdates() {
+  if (__DEV__ || Platform.OS === 'web') return;
+  try {
+    const update = await Updates.checkForUpdateAsync();
+    if (update.isAvailable) {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync();
+    }
+  } catch {
+    // Silently fail — don't block the app
+  }
+}
 
 export default function RootLayout() {
   const [dbReady, setDbReady] = useState(false);
@@ -17,6 +31,9 @@ export default function RootLayout() {
       getDatabase(),
       loadSettings(),
     ]).then(() => setDbReady(true));
+
+    // Check for OTA updates on every app launch
+    checkForUpdates();
   }, []);
 
   const isDark =
