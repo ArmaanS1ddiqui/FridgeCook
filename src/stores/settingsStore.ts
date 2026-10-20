@@ -52,9 +52,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         AsyncStorage.getItem('selected_model'),
         AsyncStorage.getItem('currency'),
       ]);
+      // Migrate stale model IDs to current ones
+      const validModels = AVAILABLE_MODELS.map(m => m.id);
+      const resolvedModel = (selectedModel && validModels.includes(selectedModel))
+        ? selectedModel
+        : 'gemini-3.8-flash';
+      if (resolvedModel !== selectedModel) {
+        await AsyncStorage.setItem('selected_model', resolvedModel);
+      }
       set({
         themeMode: (themeMode as ThemeMode) || 'dark',
-        selectedModel: selectedModel || 'gemini-3.8-flash',
+        selectedModel: resolvedModel,
         currency: currency || '$',
         isLoaded: true,
       });

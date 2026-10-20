@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { getDatabase } from '../database/schema';
-import { v4 as uuidv4 } from 'uuid';
+import * as Crypto from 'expo-crypto';
 
 export interface SavedRecipe {
   id: string;
@@ -58,7 +58,7 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
 
   saveRecipe: async (recipe) => {
     const db = await getDatabase();
-    const id = uuidv4();
+    const id = Crypto.randomUUID();
     const now = new Date().toISOString();
     await db.runAsync(
       `INSERT INTO saved_recipes (id, name, description, difficulty, prep_time_minutes, cook_time_minutes, servings, ingredients, steps, cuisine, tags, source, created_date, is_favorite)

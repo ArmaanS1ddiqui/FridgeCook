@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { getDatabase } from '../database/schema';
-import { v4 as uuidv4 } from 'uuid';
+import * as Crypto from 'expo-crypto';
 
 export interface ShoppingItem {
   id: string;
@@ -41,7 +41,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
 
   addItem: async (item) => {
     const db = await getDatabase();
-    const id = uuidv4();
+    const id = Crypto.randomUUID();
     const now = new Date().toISOString();
     await db.runAsync(
       `INSERT INTO shopping_list (id, name, quantity, unit, category, estimated_price, is_purchased, added_date, source, recipe_id)
@@ -78,7 +78,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     const db = await getDatabase();
     const now = new Date().toISOString();
     for (const ing of ingredients) {
-      const id = uuidv4();
+      const id = Crypto.randomUUID();
       await db.runAsync(
         `INSERT INTO shopping_list (id, name, quantity, unit, category, estimated_price, is_purchased, added_date, source, recipe_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { getDatabase } from '../database/schema';
-import { v4 as uuidv4 } from 'uuid';
+import * as Crypto from 'expo-crypto';
 
 export interface InventoryItem {
   id: string;
@@ -48,7 +48,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   addItem: async (item) => {
     const db = await getDatabase();
     const now = new Date().toISOString();
-    const id = uuidv4();
+    const id = Crypto.randomUUID();
     const totalPrice = item.price_per_unit * item.quantity;
     await db.runAsync(
       `INSERT INTO inventory_items (id, name, quantity, unit, category, price_per_unit, total_price, expiry_date, added_date, updated_date, notes)
@@ -100,7 +100,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
 
     const pricePerUnit = totalQuantity > 0 ? totalPrice / totalQuantity : 0;
     const now = new Date().toISOString();
-    const id = uuidv4();
+    const id = Crypto.randomUUID();
 
     // Find earliest expiry
     const expiries = items.map(i => i.expiry_date).filter(Boolean) as string[];
@@ -162,7 +162,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     const db = await getDatabase();
     const now = new Date().toISOString();
     for (const item of items) {
-      const id = uuidv4();
+      const id = Crypto.randomUUID();
       const totalPrice = item.price_per_unit * item.quantity;
       await db.runAsync(
         `INSERT INTO inventory_items (id, name, quantity, unit, category, price_per_unit, total_price, expiry_date, added_date, updated_date, notes)

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { getDatabase } from '../database/schema';
-import { v4 as uuidv4 } from 'uuid';
+import * as Crypto from 'expo-crypto';
 
 export interface CookingHistoryItem {
   id: string;
@@ -53,7 +53,7 @@ export const useCookingStore = create<CookingState>((set, get) => ({
 
   addCookingEntry: async (entry, ingredients) => {
     const db = await getDatabase();
-    const id = uuidv4();
+    const id = Crypto.randomUUID();
     const now = new Date().toISOString();
 
     await db.runAsync(
@@ -66,7 +66,7 @@ export const useCookingStore = create<CookingState>((set, get) => ({
       await db.runAsync(
         `INSERT INTO cooking_history_items (id, cooking_history_id, inventory_item_name, quantity_used, unit, cost)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), id, ing.inventory_item_name, ing.quantity_used, ing.unit, ing.cost]
+        [Crypto.randomUUID(), id, ing.inventory_item_name, ing.quantity_used, ing.unit, ing.cost]
       );
     }
 

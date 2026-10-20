@@ -90,6 +90,9 @@ class WebDatabase implements Database {
         this.data[table] = this.data[table].filter(row => row[whereCol] !== params[0]);
       } else if (sql.toLowerCase().includes('where is_purchased=1')) {
         this.data[table] = this.data[table].filter(row => !row.is_purchased);
+      } else if (!sqlLower.includes('where')) {
+        // Bare DELETE without WHERE — clear entire table
+        this.data[table] = [];
       }
     }
 
