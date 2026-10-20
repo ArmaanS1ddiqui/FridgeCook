@@ -2,7 +2,7 @@
   "expo": {
     "name": "FridgeCook",
     "slug": "armaanical",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -21,7 +21,9 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["android.permission.CAMERA"],
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
       "package": "com.armaansiddiqui.fridgecook",
       "predictiveBackGestureEnabled": false
     },
@@ -55,7 +57,9 @@
         {
           "photosPermission": "FridgeApp needs photo library access to import grocery receipt images"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-sharing"
     ]
   }
 }

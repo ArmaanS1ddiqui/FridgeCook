@@ -1,13 +1,16 @@
-import { View, ScrollView, StyleSheet } from 'react-native';
-import { Text, Card, useTheme } from 'react-native-paper';
+import { useState } from 'react';
+import { View, ScrollView, StyleSheet, Alert } from 'react-native';
+import { Text, Card, useTheme, ActivityIndicator } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useNetwork } from '../../src/hooks/useNetwork';
+import { exportBackup, importBackup } from '../../src/services/backupService';
 
 export default function SettingsScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { isConnected } = useNetwork();
+  const [isBackingUp, setIsBackingUp] = useState(false);
 
   const menuItems = [
     {
@@ -30,6 +33,44 @@ export default function SettingsScreen() {
       icon: 'history' as const,
       onPress: () => router.push('/cooking-history'),
       color: theme.colors.tertiary,
+    },
+    {
+      title: 'Export Backup',
+      description: 'Save all your data as a file',
+      icon: 'download-outline' as const,
+      onPress: async () => {
+        setIsBackingUp(true);
+        await exportBackup();
+        setIsBackingUp(false);
+      },
+      color: theme.colors.primary,
+    },
+    {
+      title: 'Import Backup',
+      description: 'Restore data from a backup file',
+      icon: 'upload-outline' as const,
+      onPress: () => {
+        Alert.alert(
+          'Import Backup',
+          'This will replace ALL your current data. Are you sure?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Import',
+              style: 'destructive',
+              onPress: async () => {
+                setIsBackingUp(true);
+                const success = await importBackup();
+                setIsBackingUp(false);
+                if (success) {
+                  Alert.alert('Success', 'Backup restored! Restart the app to see changes.');
+                }
+              },
+            },
+          ]
+        );
+      },
+      color: theme.colors.error,
     },
   ];
 
@@ -74,9 +115,18 @@ export default function SettingsScreen() {
           </Text>
         </View>
         <Text variant="bodySmall" style={{ color: theme.colors.outlineVariant, marginTop: 12, textAlign: 'center' }}>
-          FridgeCook v1.0.2 — All data stored locally
+          FridgeCook v1.1.0 — All data stored locally
         </Text>
       </View>
+
+      {isBackingUp && (
+        <View style={{ alignItems: 'center', padding: 20 }}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }}>
+            Processing backup...
+          </Text>
+        </View>
+      )}
     </ScrollView>
   );
 }

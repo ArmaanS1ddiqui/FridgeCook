@@ -4,6 +4,7 @@ import {
   FAB, Searchbar, Card, Text, Chip, IconButton, Portal, Modal,
   Button, TextInput, Menu, Switch, useTheme, Snackbar,
 } from 'react-native-paper';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useInventoryStore, InventoryItem } from '../../src/stores/inventoryStore';
 import { CATEGORIES, UNITS, CATEGORY_COLORS } from '../../src/constants/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -39,6 +40,7 @@ export default function FridgeScreen() {
   const [newNotes, setNewNotes] = useState('');
   const [showUnitMenu, setShowUnitMenu] = useState(false);
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [priceIsTotal, setPriceIsTotal] = useState(true); // true = total price, false = unit price
   const [snackMsg, setSnackMsg] = useState('');
 
@@ -106,6 +108,7 @@ export default function FridgeScreen() {
     setNewNotes('');
     setEditingItem(null);
     setPriceIsTotal(true);
+    setShowDatePicker(false);
   };
 
   const handleSaveItem = async () => {
@@ -462,13 +465,13 @@ export default function FridgeScreen() {
         <Modal
           visible={showAddModal}
           onDismiss={() => { setShowAddModal(false); resetForm(); }}
-          contentContainerStyle={[styles.modal, { backgroundColor: theme.colors.surface }]}
+          contentContainerStyle={[styles.modal, { backgroundColor: theme.colors.surface, maxHeight: '90%' }]}
         >
           <Text variant="headlineSmall" style={[styles.modalTitle, { color: theme.colors.onSurface }]}>
             {editingItem ? 'Edit Item' : 'Add Item'}
           </Text>
 
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
             <TextInput
               label="Item Name"
               value={newName}
@@ -564,14 +567,36 @@ export default function FridgeScreen() {
               </View>
             )}
 
-            <TextInput
-              label="Expiry Date — optional (YYYY-MM-DD)"
-              value={newExpiry}
-              onChangeText={setNewExpiry}
-              mode="outlined"
-              style={styles.input}
-              placeholder="2026-12-31"
-            />
+            <View style={styles.input}>
+              <Button
+                mode="outlined"
+                onPress={() => setShowDatePicker(true)}
+                icon="calendar"
+                contentStyle={{ justifyContent: 'flex-start' }}
+                style={{ borderRadius: 4 }}
+              >
+                {newExpiry ? `Expiry: ${newExpiry.split('-').reverse().join('/')}` : 'Expiry Date — optional'}
+              </Button>
+              {newExpiry ? (
+                <Button mode="text" onPress={() => setNewExpiry('')} compact textColor={theme.colors.error}>
+                  Clear expiry
+                </Button>
+              ) : null}
+            </View>
+            {showDatePicker && (
+              <DateTimePicker
+                value={newExpiry ? new Date(newExpiry) : new Date()}
+                mode="date"
+                display="default"
+                minimumDate={new Date()}
+                onChange={(event: any, selectedDate?: Date) => {
+                  setShowDatePicker(false);
+                  if (event.type === 'set' && selectedDate) {
+                    setNewExpiry(selectedDate.toISOString().split('T')[0]);
+                  }
+                }}
+              />
+            )}
 
             <TextInput
               label="Notes (optional)"
