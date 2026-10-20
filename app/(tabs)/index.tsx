@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { View, FlatList, StyleSheet, Alert, RefreshControl } from 'react-native';
+import { View, FlatList, StyleSheet, Alert, RefreshControl, ScrollView } from 'react-native';
 import {
   FAB, Searchbar, Card, Text, Chip, IconButton, Portal, Modal,
   Button, TextInput, Menu, Switch, useTheme, Snackbar,
@@ -261,7 +261,17 @@ export default function FridgeScreen() {
             )}
             <View style={[styles.categoryDot, { backgroundColor: CATEGORY_COLORS[item.category] || '#95A5A6' }]} />
             <View style={styles.itemInfo}>
-              <Text variant="titleMedium" numberOfLines={2} style={[styles.itemName, { color: theme.colors.onSurface }]}>{item.name}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text variant="titleMedium" numberOfLines={1} style={[styles.itemName, { color: theme.colors.onSurface, flex: 1 }]}>{item.name}</Text>
+                {(isExpiring || isExpired) && (
+                  <MaterialCommunityIcons
+                    name="alert-circle"
+                    size={18}
+                    color={isExpired ? theme.colors.error : '#FF9800'}
+                    style={{ marginLeft: 6 }}
+                  />
+                )}
+              </View>
               <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
                 {item.unit === '%' ? `${item.quantity}%` : `${item.quantity} ${item.unit}`} • {item.category}
                 {item.price_per_unit > 0 && ` • ${currency}${round2(item.price_per_unit)}/${item.unit}`}
@@ -458,127 +468,129 @@ export default function FridgeScreen() {
             {editingItem ? 'Edit Item' : 'Add Item'}
           </Text>
 
-          <TextInput
-            label="Item Name"
-            value={newName}
-            onChangeText={setNewName}
-            mode="outlined"
-            style={styles.input}
-          />
-
-          <View style={styles.row}>
+          <ScrollView showsVerticalScrollIndicator={false}>
             <TextInput
-              label="Quantity"
-              value={newQuantity}
-              onChangeText={setNewQuantity}
-              keyboardType="numeric"
+              label="Item Name"
+              value={newName}
+              onChangeText={setNewName}
               mode="outlined"
-              style={[styles.input, { flex: 1, marginRight: 8 }]}
+              style={styles.input}
             />
+
+            <View style={styles.row}>
+              <TextInput
+                label="Quantity"
+                value={newQuantity}
+                onChangeText={setNewQuantity}
+                keyboardType="numeric"
+                mode="outlined"
+                style={[styles.input, { flex: 1, marginRight: 8 }]}
+              />
+              <Menu
+                visible={showUnitMenu}
+                onDismiss={() => setShowUnitMenu(false)}
+                anchor={
+                  <Button mode="outlined" onPress={() => setShowUnitMenu(true)} style={styles.unitButton}>
+                    {newUnit}
+                  </Button>
+                }
+              >
+                {UNITS.map(u => (
+                  <Menu.Item key={u} onPress={() => { setNewUnit(u); setShowUnitMenu(false); }} title={u} />
+                ))}
+              </Menu>
+            </View>
+
             <Menu
-              visible={showUnitMenu}
-              onDismiss={() => setShowUnitMenu(false)}
+              visible={showCategoryMenu}
+              onDismiss={() => setShowCategoryMenu(false)}
               anchor={
-                <Button mode="outlined" onPress={() => setShowUnitMenu(true)} style={styles.unitButton}>
-                  {newUnit}
+                <Button mode="outlined" onPress={() => setShowCategoryMenu(true)} style={[styles.input, styles.categoryButton]}>
+                  Category: {newCategory}
                 </Button>
               }
             >
-              {UNITS.map(u => (
-                <Menu.Item key={u} onPress={() => { setNewUnit(u); setShowUnitMenu(false); }} title={u} />
+              {CATEGORIES.map(c => (
+                <Menu.Item key={c} onPress={() => { setNewCategory(c); setShowCategoryMenu(false); }} title={c} />
               ))}
             </Menu>
-          </View>
 
-          <Menu
-            visible={showCategoryMenu}
-            onDismiss={() => setShowCategoryMenu(false)}
-            anchor={
-              <Button mode="outlined" onPress={() => setShowCategoryMenu(true)} style={[styles.input, styles.categoryButton]}>
-                Category: {newCategory}
-              </Button>
-            }
-          >
-            {CATEGORIES.map(c => (
-              <Menu.Item key={c} onPress={() => { setNewCategory(c); setShowCategoryMenu(false); }} title={c} />
-            ))}
-          </Menu>
-
-          {/* Price input with toggle */}
-          <View style={styles.priceToggleRow}>
-            <Text variant="bodySmall" style={{ color: priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
-              Total Price
-            </Text>
-            <Switch
-              value={!priceIsTotal}
-              onValueChange={(v) => {
-                // Convert price when toggling
-                const qty = parseFloat(newQuantity) || 0;
-                const price = parseFloat(newPrice) || 0;
-                if (v && qty > 0 && price > 0) {
-                  // Switching to unit price: convert total → unit
-                  setNewPrice(round2(price / qty).toString());
-                } else if (!v && qty > 0 && price > 0) {
-                  // Switching to total price: convert unit → total
-                  setNewPrice(round2(price * qty).toString());
-                }
-                setPriceIsTotal(!v);
-              }}
-              color={theme.colors.primary}
-            />
-            <Text variant="bodySmall" style={{ color: !priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
-              Unit Price
-            </Text>
-          </View>
-
-          <TextInput
-            label={priceIsTotal ? `Total Price (${currency})` : `Price per unit (${currency})`}
-            value={newPrice}
-            onChangeText={setNewPrice}
-            keyboardType="numeric"
-            mode="outlined"
-            style={styles.input}
-          />
-
-          {/* Auto-calculated display */}
-          {(parseFloat(newPrice) > 0 && parseFloat(newQuantity) > 0) && (
-            <View style={[styles.calcRow, { backgroundColor: theme.colors.primaryContainer }]}>
-              <MaterialCommunityIcons name="calculator" size={16} color={theme.colors.primary} />
-              <Text variant="bodySmall" style={{ color: theme.colors.primary, marginLeft: 6 }}>
-                {priceIsTotal
-                  ? `Unit price: ${currency}${computedUnitPrice.toFixed(2)} per ${newUnit}`
-                  : `Total: ${currency}${computedTotalPrice.toFixed(2)} for ${newQuantity} ${newUnit}`
-                }
+            {/* Price input with toggle */}
+            <View style={styles.priceToggleRow}>
+              <Text variant="bodySmall" style={{ color: priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
+                Total Price
+              </Text>
+              <Switch
+                value={!priceIsTotal}
+                onValueChange={(v) => {
+                  // Convert price when toggling
+                  const qty = parseFloat(newQuantity) || 0;
+                  const price = parseFloat(newPrice) || 0;
+                  if (v && qty > 0 && price > 0) {
+                    // Switching to unit price: convert total → unit
+                    setNewPrice(round2(price / qty).toString());
+                  } else if (!v && qty > 0 && price > 0) {
+                    // Switching to total price: convert unit → total
+                    setNewPrice(round2(price * qty).toString());
+                  }
+                  setPriceIsTotal(!v);
+                }}
+                color={theme.colors.primary}
+              />
+              <Text variant="bodySmall" style={{ color: !priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
+                Unit Price
               </Text>
             </View>
-          )}
 
-          <TextInput
-            label="Expiry Date (YYYY-MM-DD)"
-            value={newExpiry}
-            onChangeText={setNewExpiry}
-            mode="outlined"
-            style={styles.input}
-            placeholder="2026-12-31"
-          />
+            <TextInput
+              label={priceIsTotal ? `Total Price (${currency})` : `Price per unit (${currency})`}
+              value={newPrice}
+              onChangeText={setNewPrice}
+              keyboardType="numeric"
+              mode="outlined"
+              style={styles.input}
+            />
 
-          <TextInput
-            label="Notes (optional)"
-            value={newNotes}
-            onChangeText={setNewNotes}
-            mode="outlined"
-            style={styles.input}
-            multiline
-          />
+            {/* Auto-calculated display */}
+            {(parseFloat(newPrice) > 0 && parseFloat(newQuantity) > 0) && (
+              <View style={[styles.calcRow, { backgroundColor: theme.colors.primaryContainer }]}>
+                <MaterialCommunityIcons name="calculator" size={16} color={theme.colors.primary} />
+                <Text variant="bodySmall" style={{ color: theme.colors.primary, marginLeft: 6 }}>
+                  {priceIsTotal
+                    ? `Unit price: ${currency}${computedUnitPrice.toFixed(2)} per ${newUnit}`
+                    : `Total: ${currency}${computedTotalPrice.toFixed(2)} for ${newQuantity} ${newUnit}`
+                  }
+                </Text>
+              </View>
+            )}
 
-          <View style={styles.modalButtons}>
-            <Button mode="outlined" onPress={() => { setShowAddModal(false); resetForm(); }}>
-              Cancel
-            </Button>
-            <Button mode="contained" onPress={handleSaveItem}>
-              {editingItem ? 'Update' : 'Add'}
-            </Button>
-          </View>
+            <TextInput
+              label="Expiry Date — optional (YYYY-MM-DD)"
+              value={newExpiry}
+              onChangeText={setNewExpiry}
+              mode="outlined"
+              style={styles.input}
+              placeholder="2026-12-31"
+            />
+
+            <TextInput
+              label="Notes (optional)"
+              value={newNotes}
+              onChangeText={setNewNotes}
+              mode="outlined"
+              style={styles.input}
+              multiline
+            />
+
+            <View style={styles.modalButtons}>
+              <Button mode="outlined" onPress={() => { setShowAddModal(false); resetForm(); }}>
+                Cancel
+              </Button>
+              <Button mode="contained" onPress={handleSaveItem}>
+                {editingItem ? 'Update' : 'Add'}
+              </Button>
+            </View>
+          </ScrollView>
         </Modal>
       </Portal>
 

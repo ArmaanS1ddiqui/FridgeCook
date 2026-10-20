@@ -11,8 +11,8 @@ export interface AIModel {
 
 export const AVAILABLE_MODELS: AIModel[] = [
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'gemini' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'gemini' },
-  { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite', provider: 'gemini' },
+  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', provider: 'gemini' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'gemini' },
 ];
 
 export const CURRENCIES = [
@@ -54,7 +54,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       ]);
       set({
         themeMode: (themeMode as ThemeMode) || 'dark',
-        selectedModel: selectedModel || 'gemini-2.0-flash',
+        selectedModel: selectedModel || 'gemini-2.5-flash',
         currency: currency || '$',
         isLoaded: true,
       });

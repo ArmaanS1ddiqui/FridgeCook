@@ -6,12 +6,14 @@ const API_KEY_STORAGE = 'gemini_api_key';
 let genAI: GoogleGenerativeAI | null = null;
 
 export async function setApiKey(key: string) {
-  await AsyncStorage.setItem(API_KEY_STORAGE, key);
-  genAI = new GoogleGenerativeAI(key);
+  const cleaned = key.replace(/[\n\r\s]+/g, '');
+  await AsyncStorage.setItem(API_KEY_STORAGE, cleaned);
+  genAI = new GoogleGenerativeAI(cleaned);
 }
 
 export async function getApiKey(): Promise<string | null> {
-  return AsyncStorage.getItem(API_KEY_STORAGE);
+  const key = await AsyncStorage.getItem(API_KEY_STORAGE);
+  return key ? key.replace(/[\n\r\s]+/g, '') : null;
 }
 
 export async function removeApiKey() {
