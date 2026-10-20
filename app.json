@@ -29,7 +29,12 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/fridgecook"
+      "url": "https://u.expo.dev/89b8005b-4473-4f0d-a120-33c94e33c6c3"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "89b8005b-4473-4f0d-a120-33c94e33c6c3"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png",
