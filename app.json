@@ -6,20 +6,51 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "fridgeapp",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "FridgeApp needs camera access to scan grocery receipts",
+        "NSPhotoLibraryUsageDescription": "FridgeApp needs photo library access to import grocery receipt images"
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#121212",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "permissions": ["android.permission.CAMERA"],
+      "package": "com.armaansiddiqui.fridgecook",
       "predictiveBackGestureEnabled": false
     },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/fridgecook"
+    },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FridgeApp needs camera access to scan grocery receipts"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "FridgeApp needs photo library access to import grocery receipt images"
+        }
+      ]
+    ]
   }
 }
