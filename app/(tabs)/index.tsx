@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { View, FlatList, StyleSheet, Alert, RefreshControl } from 'react-native';
 import {
   FAB, Searchbar, Card, Text, Chip, IconButton, Portal, Modal,
-  Button, TextInput, SegmentedButtons, Menu, Divider, Badge, useTheme,
+  Button, TextInput, Menu, Switch, useTheme, Snackbar,
 } from 'react-native-paper';
 import { useInventoryStore, InventoryItem } from '../../src/stores/inventoryStore';
-import { CATEGORIES, UNITS, CATEGORY_COLORS, CATEGORY_ICONS } from '../../src/constants/theme';
+import { CATEGORIES, UNITS, CATEGORY_COLORS } from '../../src/constants/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSettingsStore } from '../../src/stores/settingsStore';
@@ -24,6 +24,11 @@ export default function FridgeScreen() {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const router = useRouter();
 
+  // Bulk select mode
+  const [bulkSelectMode, setBulkSelectMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<string[]>([]);
+  const [showBulkCategoryMenu, setShowBulkCategoryMenu] = useState(false);
+
   // Add form state
   const [newName, setNewName] = useState('');
   const [newQuantity, setNewQuantity] = useState('');
@@ -34,18 +39,28 @@ export default function FridgeScreen() {
   const [newNotes, setNewNotes] = useState('');
   const [showUnitMenu, setShowUnitMenu] = useState(false);
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
+  const [priceIsTotal, setPriceIsTotal] = useState(true); // true = total price, false = unit price
+  const [snackMsg, setSnackMsg] = useState('');
 
   useEffect(() => {
     loadItems();
   }, []);
 
-  const filteredItems = items.filter(item => {
+  const filteredItems = useMemo(() => items.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = !filterCategory || item.category === filterCategory;
     return matchesSearch && matchesCategory;
-  });
+  }), [items, search, filterCategory]);
 
-  // Check for expiring items (within 3 days)
+  // Filtered value — changes based on active filter
+  const filteredValue = useMemo(() => {
+    if (!filterCategory) return totalValue;
+    return filteredItems.reduce((sum, item) => sum + (item.total_price || 0), 0);
+  }, [filteredItems, filterCategory, totalValue]);
+
+  const filteredCount = filteredItems.length;
+
+  // Expiry checks
   const expiringItems = items.filter(item => {
     if (!item.expiry_date) return false;
     const expiry = new Date(item.expiry_date);
@@ -59,6 +74,28 @@ export default function FridgeScreen() {
     return new Date(item.expiry_date) < new Date();
   });
 
+  // Round to 2 decimal places safely
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  // Auto-calculate price
+  const computedUnitPrice = useMemo(() => {
+    const qty = parseFloat(newQuantity) || 0;
+    const price = parseFloat(newPrice) || 0;
+    if (priceIsTotal) {
+      return qty > 0 ? round2(price / qty) : 0;
+    }
+    return price;
+  }, [newQuantity, newPrice, priceIsTotal]);
+
+  const computedTotalPrice = useMemo(() => {
+    const qty = parseFloat(newQuantity) || 0;
+    const price = parseFloat(newPrice) || 0;
+    if (priceIsTotal) {
+      return round2(price);
+    }
+    return round2(price * qty);
+  }, [newQuantity, newPrice, priceIsTotal]);
+
   const resetForm = () => {
     setNewName('');
     setNewQuantity('');
@@ -68,6 +105,7 @@ export default function FridgeScreen() {
     setNewExpiry('');
     setNewNotes('');
     setEditingItem(null);
+    setPriceIsTotal(true);
   };
 
   const handleSaveItem = async () => {
@@ -75,29 +113,33 @@ export default function FridgeScreen() {
       Alert.alert('Error', 'Please enter an item name');
       return;
     }
-    if (!newQuantity || parseFloat(newQuantity) <= 0) {
+    const qty = parseFloat(newQuantity);
+    if (!qty || qty <= 0) {
       Alert.alert('Error', 'Please enter a valid quantity');
       return;
     }
 
+    const unitPrice = computedUnitPrice;
+    const totalPrice = computedTotalPrice;
+
     if (editingItem) {
       await updateItem(editingItem.id, {
         name: newName.trim(),
-        quantity: parseFloat(newQuantity),
+        quantity: qty,
         unit: newUnit,
         category: newCategory,
-        price_per_unit: parseFloat(newPrice) || 0,
+        price_per_unit: unitPrice,
         expiry_date: newExpiry || null,
         notes: newNotes || null,
       });
     } else {
       await addItem({
         name: newName.trim(),
-        quantity: parseFloat(newQuantity),
+        quantity: qty,
         unit: newUnit,
         category: newCategory,
-        price_per_unit: parseFloat(newPrice) || 0,
-        total_price: (parseFloat(newPrice) || 0) * parseFloat(newQuantity),
+        price_per_unit: unitPrice,
+        total_price: totalPrice,
         expiry_date: newExpiry || null,
         notes: newNotes || null,
       });
@@ -113,7 +155,9 @@ export default function FridgeScreen() {
     setNewQuantity(item.quantity.toString());
     setNewUnit(item.unit);
     setNewCategory(item.category);
-    setNewPrice(item.price_per_unit.toString());
+    // Show total price by default when editing
+    setPriceIsTotal(true);
+    setNewPrice(item.total_price.toString());
     setNewExpiry(item.expiry_date || '');
     setNewNotes(item.notes || '');
     setShowAddModal(true);
@@ -146,47 +190,81 @@ export default function FridgeScreen() {
     setMergeName('');
   };
 
+  // Bulk select handlers
+  const handleBulkToggle = (id: string) => {
+    setBulkSelected(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkCategoryAssign = async (category: string) => {
+    for (const id of bulkSelected) {
+      await updateItem(id, { category });
+    }
+    setSnackMsg(`${bulkSelected.length} items set to ${category}`);
+    setBulkSelected([]);
+    setBulkSelectMode(false);
+    setShowBulkCategoryMenu(false);
+  };
+
+  const handleItemPress = (item: InventoryItem) => {
+    if (bulkSelectMode) {
+      handleBulkToggle(item.id);
+    } else if (showMergeMode) {
+      handleMergeToggle(item.id);
+    } else {
+      handleStartEdit(item);
+    }
+  };
+
+  const handleItemLongPress = (item: InventoryItem) => {
+    if (!bulkSelectMode && !showMergeMode) {
+      setBulkSelectMode(true);
+      setBulkSelected([item.id]);
+    }
+  };
+
   const mergeableItems = items.filter(i => selectedForMerge.includes(i.id));
 
   const renderItem = ({ item }: { item: InventoryItem }) => {
     const isSelected = selectedForMerge.includes(item.id);
+    const isBulkSelected = bulkSelected.includes(item.id);
     const isExpired = item.expiry_date && new Date(item.expiry_date) < new Date();
     const isExpiring = item.expiry_date && !isExpired && (() => {
       const diffDays = (new Date(item.expiry_date!).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
       return diffDays <= 3;
     })();
 
+    const showCheckbox = showMergeMode || bulkSelectMode;
+    const checked = showMergeMode ? isSelected : isBulkSelected;
+
     return (
       <Card
         style={[
           styles.itemCard,
           { backgroundColor: theme.colors.surface },
-          isSelected && { backgroundColor: theme.colors.primaryContainer, borderWidth: 2, borderColor: theme.colors.primary },
-          isExpired && { backgroundColor: theme.colors.errorContainer, borderWidth: 1, borderColor: theme.colors.error },
+          (isSelected || isBulkSelected) && { backgroundColor: theme.colors.primaryContainer, borderWidth: 2, borderColor: theme.colors.primary },
+          isExpired && !isSelected && !isBulkSelected && { backgroundColor: theme.colors.errorContainer, borderWidth: 1, borderColor: theme.colors.error },
         ]}
-        onPress={() => showMergeMode ? handleMergeToggle(item.id) : handleStartEdit(item)}
-        onLongPress={() => {
-          Alert.alert('Delete Item', `Delete "${item.name}"?`, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: () => deleteItem(item.id) },
-          ]);
-        }}
+        onPress={() => handleItemPress(item)}
+        onLongPress={() => handleItemLongPress(item)}
       >
         <Card.Content style={styles.itemContent}>
           <View style={styles.itemLeft}>
-            {showMergeMode && (
+            {showCheckbox && (
               <MaterialCommunityIcons
-                name={isSelected ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                name={checked ? 'checkbox-marked' : 'checkbox-blank-outline'}
                 size={24}
-                color={isSelected ? theme.colors.primary : theme.colors.onSurfaceVariant}
+                color={checked ? theme.colors.primary : theme.colors.onSurfaceVariant}
                 style={{ marginRight: 8 }}
               />
             )}
             <View style={[styles.categoryDot, { backgroundColor: CATEGORY_COLORS[item.category] || '#95A5A6' }]} />
             <View style={styles.itemInfo}>
-              <Text variant="titleMedium" style={[styles.itemName, { color: theme.colors.onSurface }]}>{item.name}</Text>
+              <Text variant="titleMedium" numberOfLines={2} style={[styles.itemName, { color: theme.colors.onSurface }]}>{item.name}</Text>
               <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
                 {item.unit === '%' ? `${item.quantity}%` : `${item.quantity} ${item.unit}`} • {item.category}
+                {item.price_per_unit > 0 && ` • ${currency}${round2(item.price_per_unit)}/${item.unit}`}
                 {item.expiry_date && (
                   isExpired ? ' • EXPIRED' :
                   isExpiring ? ' • Expiring soon!' : ''
@@ -197,7 +275,7 @@ export default function FridgeScreen() {
           <View style={styles.itemRight}>
             {item.total_price > 0 && (
               <Text variant="titleSmall" style={{ color: theme.colors.primary, fontWeight: '600' }}>
-                {currency}{item.total_price.toFixed(2)}
+                {currency}{round2(item.total_price).toFixed(2)}
               </Text>
             )}
           </View>
@@ -211,13 +289,21 @@ export default function FridgeScreen() {
       {/* Summary Bar */}
       <View style={[styles.summaryBar, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.outline }]}>
         <View style={styles.summaryItem}>
-          <Text variant="headlineSmall" style={[styles.summaryValue, { color: theme.colors.primary }]}>{items.length}</Text>
-          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>Items</Text>
+          <Text variant="headlineSmall" style={[styles.summaryValue, { color: theme.colors.primary }]}>
+            {filterCategory ? filteredCount : items.length}
+          </Text>
+          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+            {filterCategory ? filterCategory : 'Items'}
+          </Text>
         </View>
         <View style={[styles.summaryDivider, { backgroundColor: theme.colors.outline }]} />
         <View style={styles.summaryItem}>
-          <Text variant="headlineSmall" style={[styles.summaryValue, { color: theme.colors.primary }]}>{currency}{totalValue.toFixed(2)}</Text>
-          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>Total Value</Text>
+          <Text variant="headlineSmall" style={[styles.summaryValue, { color: theme.colors.primary }]}>
+            {currency}{filteredValue.toFixed(2)}
+          </Text>
+          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+            {filterCategory ? `${filterCategory} Value` : 'Total Value'}
+          </Text>
         </View>
         {(expiringItems.length > 0 || expiredItems.length > 0) && (
           <>
@@ -234,7 +320,7 @@ export default function FridgeScreen() {
         )}
       </View>
 
-      {/* Search and Filter */}
+      {/* Search */}
       <Searchbar
         placeholder="Search items..."
         value={search}
@@ -270,7 +356,7 @@ export default function FridgeScreen() {
 
       {/* Merge Mode Bar */}
       {showMergeMode && (
-        <View style={[styles.mergeBar, { backgroundColor: theme.colors.tertiaryContainer }]}>
+        <View style={[styles.actionBar, { backgroundColor: theme.colors.tertiaryContainer }]}>
           <Text variant="bodyMedium" style={{ fontWeight: '600', color: theme.colors.tertiary }}>
             {selectedForMerge.length} selected
           </Text>
@@ -283,12 +369,44 @@ export default function FridgeScreen() {
         </View>
       )}
 
+      {/* Bulk Select Bar */}
+      {bulkSelectMode && (
+        <View style={[styles.actionBar, { backgroundColor: theme.colors.secondaryContainer }]}>
+          <Text variant="bodyMedium" style={{ fontWeight: '600', color: theme.colors.secondary }}>
+            {bulkSelected.length} selected
+          </Text>
+          <Menu
+            visible={showBulkCategoryMenu}
+            onDismiss={() => setShowBulkCategoryMenu(false)}
+            anchor={
+              <Button
+                mode="contained"
+                onPress={() => setShowBulkCategoryMenu(true)}
+                disabled={bulkSelected.length === 0}
+                compact
+                buttonColor={theme.colors.secondary}
+              >
+                Set Category
+              </Button>
+            }
+          >
+            {CATEGORIES.map(c => (
+              <Menu.Item key={c} onPress={() => handleBulkCategoryAssign(c)} title={c} />
+            ))}
+          </Menu>
+          <Button mode="outlined" onPress={() => { setBulkSelectMode(false); setBulkSelected([]); }} compact>
+            Cancel
+          </Button>
+        </View>
+      )}
+
       {/* Item List */}
       <FlatList
         data={filteredItems}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
+        keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl refreshing={isLoading} onRefresh={loadItems} />
         }
@@ -304,28 +422,30 @@ export default function FridgeScreen() {
       />
 
       {/* FAB Group */}
-      <View style={styles.fabContainer}>
-        <FAB
-          icon="merge"
-          size="small"
-          style={[styles.fabSmall, { backgroundColor: theme.colors.tertiary }]}
-          color={theme.colors.onTertiary}
-          onPress={() => setShowMergeMode(!showMergeMode)}
-        />
-        <FAB
-          icon="camera"
-          size="small"
-          style={[styles.fabSmall, { backgroundColor: theme.colors.secondary }]}
-          color={theme.colors.onSecondary}
-          onPress={() => router.push('/scan')}
-        />
-        <FAB
-          icon="plus"
-          style={[styles.fab, { backgroundColor: theme.colors.primary }]}
-          onPress={() => { resetForm(); setShowAddModal(true); }}
-          color={theme.colors.onPrimary}
-        />
-      </View>
+      {!bulkSelectMode && !showMergeMode && (
+        <View style={styles.fabContainer}>
+          <FAB
+            icon="merge"
+            size="small"
+            style={[styles.fabSmall, { backgroundColor: theme.colors.tertiary }]}
+            color={theme.colors.onTertiary}
+            onPress={() => setShowMergeMode(!showMergeMode)}
+          />
+          <FAB
+            icon="camera"
+            size="small"
+            style={[styles.fabSmall, { backgroundColor: theme.colors.secondary }]}
+            color={theme.colors.onSecondary}
+            onPress={() => router.push('/scan')}
+          />
+          <FAB
+            icon="plus"
+            style={[styles.fab, { backgroundColor: theme.colors.primary }]}
+            onPress={() => { resetForm(); setShowAddModal(true); }}
+            color={theme.colors.onPrimary}
+          />
+        </View>
+      )}
 
       {/* Add/Edit Item Modal */}
       <Portal>
@@ -384,8 +504,35 @@ export default function FridgeScreen() {
             ))}
           </Menu>
 
+          {/* Price input with toggle */}
+          <View style={styles.priceToggleRow}>
+            <Text variant="bodySmall" style={{ color: priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
+              Total Price
+            </Text>
+            <Switch
+              value={!priceIsTotal}
+              onValueChange={(v) => {
+                // Convert price when toggling
+                const qty = parseFloat(newQuantity) || 0;
+                const price = parseFloat(newPrice) || 0;
+                if (v && qty > 0 && price > 0) {
+                  // Switching to unit price: convert total → unit
+                  setNewPrice(round2(price / qty).toString());
+                } else if (!v && qty > 0 && price > 0) {
+                  // Switching to total price: convert unit → total
+                  setNewPrice(round2(price * qty).toString());
+                }
+                setPriceIsTotal(!v);
+              }}
+              color={theme.colors.primary}
+            />
+            <Text variant="bodySmall" style={{ color: !priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
+              Unit Price
+            </Text>
+          </View>
+
           <TextInput
-            label={`Price per unit (${currency})`}
+            label={priceIsTotal ? `Total Price (${currency})` : `Price per unit (${currency})`}
             value={newPrice}
             onChangeText={setNewPrice}
             keyboardType="numeric"
@@ -393,13 +540,26 @@ export default function FridgeScreen() {
             style={styles.input}
           />
 
+          {/* Auto-calculated display */}
+          {(parseFloat(newPrice) > 0 && parseFloat(newQuantity) > 0) && (
+            <View style={[styles.calcRow, { backgroundColor: theme.colors.primaryContainer }]}>
+              <MaterialCommunityIcons name="calculator" size={16} color={theme.colors.primary} />
+              <Text variant="bodySmall" style={{ color: theme.colors.primary, marginLeft: 6 }}>
+                {priceIsTotal
+                  ? `Unit price: ${currency}${computedUnitPrice.toFixed(2)} per ${newUnit}`
+                  : `Total: ${currency}${computedTotalPrice.toFixed(2)} for ${newQuantity} ${newUnit}`
+                }
+              </Text>
+            </View>
+          )}
+
           <TextInput
             label="Expiry Date (YYYY-MM-DD)"
             value={newExpiry}
             onChangeText={setNewExpiry}
             mode="outlined"
             style={styles.input}
-            placeholder="2024-12-31"
+            placeholder="2026-12-31"
           />
 
           <TextInput
@@ -463,14 +623,22 @@ export default function FridgeScreen() {
           </View>
         </Modal>
       </Portal>
+
+      {/* Snackbar */}
+      <Snackbar
+        visible={!!snackMsg}
+        onDismiss={() => setSnackMsg('')}
+        duration={2000}
+        style={{ backgroundColor: theme.colors.inverseSurface }}
+      >
+        {snackMsg}
+      </Snackbar>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   summaryBar: {
     flexDirection: 'row',
     paddingVertical: 16,
@@ -479,37 +647,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderBottomWidth: 1,
   },
-  summaryItem: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  summaryValue: {
-    fontWeight: '700',
-  },
-  summaryDivider: {
-    width: 1,
-    height: 36,
-  },
-  searchbar: {
-    margin: 12,
-    elevation: 0,
-    borderWidth: 1,
-  },
-  searchInput: {
-    fontSize: 14,
-  },
-  chipList: {
-    maxHeight: 44,
-    paddingLeft: 12,
-  },
-  chipContainer: {
-    gap: 6,
-    paddingRight: 12,
-  },
-  chip: {
-    borderWidth: 1,
-  },
-  mergeBar: {
+  summaryItem: { alignItems: 'center', paddingHorizontal: 20 },
+  summaryValue: { fontWeight: '700' },
+  summaryDivider: { width: 1, height: 36 },
+  searchbar: { margin: 12, elevation: 0, borderWidth: 1 },
+  searchInput: { fontSize: 14 },
+  chipList: { maxHeight: 44, paddingLeft: 12 },
+  chipContainer: { gap: 6, paddingRight: 12 },
+  chip: { borderWidth: 1 },
+  actionBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -517,95 +663,46 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginHorizontal: 12,
     marginTop: 8,
-    borderRadius: 8,
+    borderRadius: 12,
   },
-  list: {
-    padding: 12,
-    paddingBottom: 100,
-  },
-  itemCard: {
-    marginBottom: 8,
-    borderRadius: 16,
-    elevation: 1,
-  },
+  list: { padding: 12, paddingBottom: 100 },
+  itemCard: { marginBottom: 8, borderRadius: 16, elevation: 1 },
   itemContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
-  itemLeft: {
+  itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  categoryDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
+  itemInfo: { flex: 1 },
+  itemName: { fontWeight: '600' },
+  itemRight: { alignItems: 'flex-end' },
+  fabContainer: { position: 'absolute', bottom: 16, right: 16, alignItems: 'center', gap: 12 },
+  fab: { borderRadius: 16 },
+  fabSmall: { borderRadius: 16 },
+  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
+  modal: { margin: 20, padding: 24, borderRadius: 16, maxHeight: '85%' },
+  modalTitle: { fontWeight: '700', marginBottom: 16 },
+  input: { marginBottom: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 0 },
+  unitButton: { marginTop: -4, minWidth: 70 },
+  categoryButton: { justifyContent: 'center' },
+  modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 8 },
+  mergeChip: { marginBottom: 6, alignSelf: 'flex-start' },
+  priceToggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-  },
-  categoryDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 12,
-  },
-  itemInfo: {
-    flex: 1,
-  },
-  itemName: {
-    fontWeight: '600',
-  },
-  itemRight: {
-    alignItems: 'flex-end',
-  },
-  fabContainer: {
-    position: 'absolute',
-    bottom: 16,
-    right: 16,
-    alignItems: 'center',
-    gap: 12,
-  },
-  fab: {
-    borderRadius: 16,
-  },
-  fabSmall: {
-    borderRadius: 16,
-  },
-  emptyState: {
-    flex: 1,
     justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  calcRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 80,
-  },
-  modal: {
-    margin: 20,
-    padding: 24,
-    borderRadius: 16,
-    maxHeight: '85%',
-  },
-  modalTitle: {
-    fontWeight: '700',
-    marginBottom: 16,
-  },
-  input: {
+    padding: 10,
+    borderRadius: 10,
     marginBottom: 12,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 0,
-  },
-  unitButton: {
     marginTop: -4,
-    minWidth: 70,
-  },
-  categoryButton: {
-    justifyContent: 'center',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-    marginTop: 8,
-  },
-  mergeChip: {
-    marginBottom: 6,
-    alignSelf: 'flex-start',
   },
 });

@@ -29,7 +29,7 @@ async function getAI(): Promise<GoogleGenerativeAI> {
 
 async function getSelectedModel(): Promise<string> {
   const model = await AsyncStorage.getItem('selected_model');
-  return model || 'gemini-2.0-flash';
+  return model || 'gemini-2.5-flash';
 }
 
 // Test API connection and return model info
