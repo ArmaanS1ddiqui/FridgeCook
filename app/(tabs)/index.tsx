@@ -153,6 +153,9 @@ export default function FridgeScreen() {
   };
 
   const handleStartEdit = (item: InventoryItem) => {
+    router.push(`/add-item?editId=${item.id}`);
+    return;
+    // Legacy modal code below — kept for reference
     setEditingItem(item);
     setNewName(item.name);
     setNewQuantity(item.quantity.toString());
@@ -454,7 +457,7 @@ export default function FridgeScreen() {
           <FAB
             icon="plus"
             style={[styles.fab, { backgroundColor: theme.colors.primary }]}
-            onPress={() => { resetForm(); setShowAddModal(true); }}
+            onPress={() => router.push('/add-item')}
             color={theme.colors.onPrimary}
           />
         </View>
