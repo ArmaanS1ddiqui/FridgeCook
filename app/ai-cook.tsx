@@ -22,7 +22,7 @@ export default function AICookScreen() {
   const { addCookingEntry } = useCookingStore();
   const { recalculateFromHistory } = useProfileStore();
   const router = useRouter();
-  const { currency } = useSettingsStore();
+  const { currency, appliances: userAppliances, supermarket: userSupermarket } = useSettingsStore();
 
   const [difficulty, setDifficulty] = useState(5);
   const [servings, setServings] = useState(2);
@@ -74,6 +74,8 @@ export default function AICookScreen() {
           allergies: profile.allergies,
         } : undefined,
         servings,
+        appliances: userAppliances,
+        supermarket: userSupermarket,
       });
       setSuggestions(results);
     } catch (error: any) {

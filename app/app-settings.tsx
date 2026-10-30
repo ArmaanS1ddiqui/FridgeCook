@@ -5,7 +5,7 @@ import {
   ActivityIndicator, Banner, Chip, Snackbar,
 } from 'react-native-paper';
 import { setApiKey, getApiKey, removeApiKey, testApiConnection } from '../src/services/aiService';
-import { useSettingsStore, AVAILABLE_MODELS, CURRENCIES, ThemeMode } from '../src/stores/settingsStore';
+import { useSettingsStore, AVAILABLE_MODELS, CURRENCIES, DUBAI_SUPERMARKETS, KITCHEN_APPLIANCES, ThemeMode } from '../src/stores/settingsStore';
 import { useNetwork } from '../src/hooks/useNetwork';
 import { useTheme } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -14,7 +14,7 @@ import { Stack } from 'expo-router';
 export default function AppSettingsScreen() {
   const theme = useTheme();
   const { isConnected } = useNetwork();
-  const { themeMode, selectedModel, currency, setThemeMode, setSelectedModel, setCurrency } = useSettingsStore();
+  const { themeMode, selectedModel, currency, supermarket, appliances, setThemeMode, setSelectedModel, setCurrency, setSupermarket, toggleAppliance } = useSettingsStore();
 
   const [apiKey, setApiKeyState] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
@@ -151,6 +151,76 @@ export default function AppSettingsScreen() {
                   compact
                 >
                   {c.symbol} {c.name}
+                </Chip>
+              ))}
+            </View>
+          </Card.Content>
+        </Card>
+
+        {/* Supermarket */}
+        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+          <Card.Content>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="cart-outline" size={20} color={theme.colors.primary} />
+              <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
+                Supermarket
+              </Text>
+            </View>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
+              Select your preferred supermarket for price references
+            </Text>
+            {DUBAI_SUPERMARKETS.map(s => (
+              <View key={s.id} style={[styles.radioRow, { borderBottomColor: theme.colors.outline }]}>
+                <RadioButton.Android
+                  value={s.id}
+                  status={supermarket === s.id ? 'checked' : 'unchecked'}
+                  onPress={() => { if (s.available) { setSupermarket(s.id); showConfirmation('Supermarket set to ' + s.name); } }}
+                  disabled={!s.available}
+                  color={theme.colors.primary}
+                />
+                <View style={{ flex: 1, opacity: s.available ? 1 : 0.5 }}>
+                  <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>{s.name}</Text>
+                  {!s.available && (
+                    <Text variant="bodySmall" style={{ color: theme.colors.secondary, fontStyle: 'italic' }}>Coming Soon</Text>
+                  )}
+                </View>
+                {supermarket === s.id && s.available && (
+                  <MaterialCommunityIcons name="check-circle" size={18} color={theme.colors.primary} />
+                )}
+              </View>
+            ))}
+          </Card.Content>
+        </Card>
+
+        {/* Kitchen Appliances */}
+        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+          <Card.Content>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="stove" size={20} color={theme.colors.primary} />
+              <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
+                Kitchen Appliances
+              </Text>
+            </View>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
+              Select the appliances you have — AI recipes will only use these
+            </Text>
+            <View style={styles.currencyRow}>
+              {KITCHEN_APPLIANCES.map(a => (
+                <Chip
+                  key={a.id}
+                  selected={appliances.includes(a.id)}
+                  onPress={() => { toggleAppliance(a.id); showConfirmation(appliances.includes(a.id) ? `Removed ${a.name}` : `Added ${a.name}`); }}
+                  icon={a.icon}
+                  style={[
+                    styles.currencyChip,
+                    appliances.includes(a.id)
+                      ? { backgroundColor: theme.colors.primaryContainer }
+                      : { backgroundColor: theme.colors.surfaceVariant },
+                  ]}
+                  textStyle={appliances.includes(a.id) ? { color: theme.colors.primary, fontWeight: '700' } : { color: theme.colors.onSurface }}
+                  compact
+                >
+                  {a.name}
                 </Chip>
               ))}
             </View>

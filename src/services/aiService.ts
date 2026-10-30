@@ -98,6 +98,8 @@ export async function getRecipeSuggestions(params: {
     allergies: string[];
   };
   servings?: number;
+  appliances?: string[];
+  supermarket?: string;
 }): Promise<AIRecipeSuggestion[]> {
   const ai = await getAI();
   const modelId = await getSelectedModel();
@@ -119,6 +121,14 @@ User Taste Profile:
 `
     : '';
 
+  const appliancesContext = params.appliances && params.appliances.length > 0
+    ? `\nAvailable Kitchen Appliances: ${params.appliances.join(', ')}\nIMPORTANT: Only suggest recipes that can be made using THESE appliances. Do not suggest recipes requiring equipment the user doesn't have.`
+    : '';
+
+  const supermarketContext = params.supermarket
+    ? `\nUser shops at: ${params.supermarket} (Dubai, UAE). Consider locally available ingredients and Middle Eastern cuisine options.`
+    : '';
+
   const prompt = `You are a chef AI. Suggest 3-5 recipes based on the available ingredients.
 
 Available Ingredients:
@@ -128,6 +138,8 @@ Difficulty Level: ${params.difficulty}/10
 Servings: ${params.servings || 2}
 ${params.allowExtras ? 'You MAY suggest recipes that need a few additional ingredients not in inventory, but prefer recipes using mostly available ingredients.' : 'ONLY use ingredients from the available inventory. Do not suggest any recipe requiring ingredients not listed above.'}
 ${profileContext}
+${appliancesContext}
+${supermarketContext}
 
 Return ONLY valid JSON array with this structure (no markdown, no code blocks):
 [
