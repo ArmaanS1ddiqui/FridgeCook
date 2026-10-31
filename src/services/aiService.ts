@@ -82,6 +82,10 @@ export interface AIRecipeSuggestion {
     needs_timer?: boolean;
   }>;
   estimated_cost: number;
+  calories: number;
+  protein_grams: number;
+  calories_percent?: number; // % of daily needs
+  protein_percent?: number; // % of daily needs
   match_score: number;
 }
 
@@ -100,6 +104,10 @@ export async function getRecipeSuggestions(params: {
   servings?: number;
   appliances?: string[];
   supermarket?: string;
+  currency?: string;
+  dailyCalories?: number;
+  dailyProtein?: number;
+  goalType?: string;
 }): Promise<AIRecipeSuggestion[]> {
   const ai = await getAI();
   const modelId = await getSelectedModel();
@@ -129,6 +137,14 @@ User Taste Profile:
     ? `\nUser shops at: ${params.supermarket} (Dubai, UAE). Consider locally available ingredients and Middle Eastern cuisine options.`
     : '';
 
+  const currencySymbol = params.currency || '$';
+
+  const nutritionContext = (params.dailyCalories && params.dailyProtein)
+    ? `\nUser's daily nutritional needs: ${params.dailyCalories} calories, ${params.dailyProtein}g protein.
+${params.goalType === 'high_protein' ? 'User prefers HIGH PROTEIN recipes. Prioritize protein-rich dishes.' : ''}
+For each recipe, calculate approximate calories and protein, and what percentage of daily needs this dish fulfills.`
+    : '';
+
   const prompt = `You are a chef AI. Suggest 3-5 recipes based on the available ingredients.
 
 Available Ingredients:
@@ -140,6 +156,7 @@ ${params.allowExtras ? 'You MAY suggest recipes that need a few additional ingre
 ${profileContext}
 ${appliancesContext}
 ${supermarketContext}
+${nutritionContext}
 
 Return ONLY valid JSON array with this structure (no markdown, no code blocks):
 [
@@ -158,13 +175,24 @@ Return ONLY valid JSON array with this structure (no markdown, no code blocks):
       { "step": 1, "instruction": "Step description", "duration_minutes": number, "needs_timer": true/false }
     ],
     "estimated_cost": number,
+    "calories": number,
+    "protein_grams": number,
+    "calories_percent": number,
+    "protein_percent": number,
     "match_score": 0-100
   }
 ]
 
-For each ingredient, set "available" to true if it's in the inventory, false if it needs to be purchased. Set "inInventory" to the quantity available (0 if not available).
-For each step, set "needs_timer" to true if the step involves waiting (boiling, baking, marinating, resting, simmering, etc.) and false for active work (chopping, mixing, plating).
-Sort recipes by match_score descending (best matches first).`;
+IMPORTANT:
+- All costs must be in ${currencySymbol} (the user's selected currency)
+- "estimated_cost" must be a number in ${currencySymbol}
+- "calories" is the total calories for the entire recipe (all servings)
+- "protein_grams" is the total protein in grams for the entire recipe
+- "calories_percent" is what percentage of the user's daily ${params.dailyCalories || 2000} calorie need this recipe fulfills (per serving)
+- "protein_percent" is what percentage of the user's daily ${params.dailyProtein || 50}g protein need this recipe fulfills (per serving)
+- For each ingredient, set "available" to true if it's in the inventory, false if it needs to be purchased. Set "inInventory" to the quantity available (0 if not available).
+- For each step, set "needs_timer" to true if the step involves waiting (boiling, baking, marinating, resting, simmering, etc.) and false for active work (chopping, mixing, plating).
+- Sort recipes by match_score descending (best matches first).`;
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();

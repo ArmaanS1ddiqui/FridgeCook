@@ -10,7 +10,7 @@ import { useCookingStore } from '../src/stores/cookingStore';
 import { getRecipeSuggestions, AIRecipeSuggestion } from '../src/services/aiService';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { preflightCheck } from '../src/hooks/usePreflightCheck';
-import { useSettingsStore, KITCHEN_APPLIANCES, DUBAI_SUPERMARKETS } from '../src/stores/settingsStore';
+import { useSettingsStore, KITCHEN_APPLIANCES, DUBAI_SUPERMARKETS, calculateDailyNeeds } from '../src/stores/settingsStore';
 
 export default function AICookScreen() {
   const theme = useTheme();
@@ -22,7 +22,7 @@ export default function AICookScreen() {
   const { addCookingEntry } = useCookingStore();
   const { recalculateFromHistory } = useProfileStore();
   const router = useRouter();
-  const { currency, appliances: userAppliances, supermarket: userSupermarket } = useSettingsStore();
+  const { currency, appliances: userAppliances, supermarket: userSupermarket, healthProfile } = useSettingsStore();
 
   const [difficulty, setDifficulty] = useState(5);
   const [servings, setServings] = useState(2);
@@ -57,6 +57,8 @@ export default function AICookScreen() {
     setSelectedRecipe(null);
 
     try {
+      const dailyNeeds = healthProfile ? calculateDailyNeeds(healthProfile) : null;
+
       const results = await getRecipeSuggestions({
         inventory: inventory.map(i => ({
           name: i.name,
@@ -77,6 +79,10 @@ export default function AICookScreen() {
         servings,
         appliances: userAppliances.map(id => KITCHEN_APPLIANCES.find(a => a.id === id)?.name || id),
         supermarket: DUBAI_SUPERMARKETS.find(s => s.id === userSupermarket)?.name || userSupermarket,
+        currency,
+        dailyCalories: dailyNeeds?.calories,
+        dailyProtein: dailyNeeds?.protein,
+        goalType: healthProfile?.goalType,
       });
       setSuggestions(results);
     } catch (error: any) {
@@ -145,50 +151,55 @@ export default function AICookScreen() {
       return;
     }
     setIsCooking(true);
-
-    // Calculate costs BEFORE consuming (items may be deleted after consumption)
-    const costData: Record<string, number> = {};
-    let totalRecipeCost = 0;
-    for (const ing of selectedRecipe.ingredients) {
-      if (ing.available) {
-        const invItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
-        const cost = invItem ? invItem.price_per_unit * ing.quantity : 0;
-        costData[ing.name] = cost;
-        totalRecipeCost += cost;
+    try {
+      // Calculate costs BEFORE consuming (items may be deleted after consumption)
+      const costData: Record<string, number> = {};
+      let totalRecipeCost = 0;
+      for (const ing of selectedRecipe.ingredients) {
+        if (ing.available) {
+          const invItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
+          const cost = invItem ? invItem.price_per_unit * ing.quantity : 0;
+          costData[ing.name] = cost;
+          totalRecipeCost += cost;
+        }
       }
+
+      // Consume inventory items (batch to avoid N+1 reloads)
+      const consumptions = selectedRecipe.ingredients
+        .filter(ing => ing.available)
+        .map(ing => {
+          const inventoryItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
+          return inventoryItem ? { id: inventoryItem.id, quantity: Math.min(ing.quantity, inventoryItem.quantity) } : null;
+        })
+        .filter((c): c is { id: string; quantity: number } => c !== null);
+      if (consumptions.length > 0) {
+        const { consumeItems } = useInventoryStore.getState();
+        await consumeItems(consumptions);
+      }
+
+      // Save recipe
+      const recipeId = await saveRecipe({
+        name: selectedRecipe.name,
+        description: selectedRecipe.description,
+        difficulty: selectedRecipe.difficulty,
+        prep_time_minutes: selectedRecipe.prep_time_minutes,
+        cook_time_minutes: selectedRecipe.cook_time_minutes,
+        servings: selectedRecipe.servings,
+        ingredients: JSON.stringify(selectedRecipe.ingredients),
+        steps: JSON.stringify(selectedRecipe.steps),
+        cuisine: selectedRecipe.cuisine,
+        tags: null,
+        source: 'ai',
+        is_favorite: 0,
+      });
+
+      // Navigate to recipe detail for step-by-step
+      router.replace(`/recipe-detail?id=${recipeId}&cooking=true&costData=${encodeURIComponent(JSON.stringify(costData))}&totalCost=${totalRecipeCost}&cookType=${allowExtras ? 'ai_extras' : 'ai_inventory'}`);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to cook');
+    } finally {
+      setIsCooking(false);
     }
-
-    // Consume inventory items (batch to avoid N+1 reloads)
-    const consumptions = selectedRecipe.ingredients
-      .filter(ing => ing.available)
-      .map(ing => {
-        const inventoryItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
-        return inventoryItem ? { id: inventoryItem.id, quantity: Math.min(ing.quantity, inventoryItem.quantity) } : null;
-      })
-      .filter((c): c is { id: string; quantity: number } => c !== null);
-    if (consumptions.length > 0) {
-      const { consumeItems } = useInventoryStore.getState();
-      await consumeItems(consumptions);
-    }
-
-    // Save recipe
-    const recipeId = await saveRecipe({
-      name: selectedRecipe.name,
-      description: selectedRecipe.description,
-      difficulty: selectedRecipe.difficulty,
-      prep_time_minutes: selectedRecipe.prep_time_minutes,
-      cook_time_minutes: selectedRecipe.cook_time_minutes,
-      servings: selectedRecipe.servings,
-      ingredients: JSON.stringify(selectedRecipe.ingredients),
-      steps: JSON.stringify(selectedRecipe.steps),
-      cuisine: selectedRecipe.cuisine,
-      tags: null,
-      source: 'ai',
-      is_favorite: 0,
-    });
-
-    // Navigate to recipe detail for step-by-step
-    router.replace(`/recipe-detail?id=${recipeId}&cooking=true&costData=${encodeURIComponent(JSON.stringify(costData))}&totalCost=${totalRecipeCost}&cookType=${allowExtras ? 'ai_extras' : 'ai_inventory'}`);
   };
 
   const addUnavailableToShoppingList = () => {
@@ -306,8 +317,22 @@ export default function AICookScreen() {
                   <View style={styles.metaRow}>
                     <Chip compact icon="clock-outline">{recipe.prep_time_minutes + recipe.cook_time_minutes} min</Chip>
                     <Chip compact icon="signal">Lvl {recipe.difficulty}</Chip>
-                    <Chip compact icon="currency-usd">{currency}{recipe.estimated_cost.toFixed(2)}</Chip>
+                    <Chip compact icon="cash">{currency}{recipe.estimated_cost.toFixed(2)}</Chip>
                   </View>
+                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                    <Chip compact icon="fire">{recipe.servings ? Math.round(recipe.calories / recipe.servings) : recipe.calories} cal/serving</Chip>
+                    <Chip compact icon="arm-flex">{recipe.servings ? Math.round(recipe.protein_grams / recipe.servings) : recipe.protein_grams}g protein/serving</Chip>
+                  </View>
+                  {(recipe.calories_percent || recipe.protein_percent) && (
+                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4, fontStyle: 'italic' }}>
+                      Per serving: {recipe.calories_percent}% daily calories • {recipe.protein_percent}% daily protein
+                    </Text>
+                  )}
+                  {!healthProfile && (recipe.calories_percent || recipe.protein_percent) && (
+                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontSize: 10 }}>
+                      Based on general 2000 cal diet
+                    </Text>
+                  )}
                   {recipe.ingredients.some(i => !i.available) && (
                     <View style={[styles.missingRow, { backgroundColor: theme.colors.tertiaryContainer }]}>
                       <MaterialCommunityIcons name="cart-plus" size={16} color={theme.colors.tertiary} />
@@ -329,6 +354,21 @@ export default function AICookScreen() {
 
             <Text variant="headlineSmall" style={[styles.recipeTitleLarge, { color: theme.colors.onSurface }]}>{selectedRecipe.name}</Text>
             <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 16 }}>{selectedRecipe.description}</Text>
+
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+              <Chip compact icon="fire">{selectedRecipe.servings ? Math.round(selectedRecipe.calories / selectedRecipe.servings) : selectedRecipe.calories} cal/serving</Chip>
+              <Chip compact icon="arm-flex">{selectedRecipe.servings ? Math.round(selectedRecipe.protein_grams / selectedRecipe.servings) : selectedRecipe.protein_grams}g protein/serving</Chip>
+            </View>
+            {(selectedRecipe.calories_percent || selectedRecipe.protein_percent) && (
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12, fontStyle: 'italic' }}>
+                Per serving: {selectedRecipe.calories_percent}% daily calories • {selectedRecipe.protein_percent}% daily protein
+              </Text>
+            )}
+            {!healthProfile && (selectedRecipe.calories_percent || selectedRecipe.protein_percent) && (
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontSize: 10 }}>
+                Based on general 2000 cal diet
+              </Text>
+            )}
 
             <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
               <Card.Content>

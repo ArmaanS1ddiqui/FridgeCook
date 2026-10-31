@@ -71,45 +71,49 @@ export default function ManualCookScreen() {
       return;
     }
     setIsCooking(true);
+    try {
+      if (ratingTaste === 0) {
+        Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
+        return;
+      }
 
-    if (ratingTaste === 0) {
-      Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
+      // Consume ingredients from inventory (batch to avoid N+1 reloads)
+      const { consumeItems } = useInventoryStore.getState();
+      await consumeItems(selectedIngredients.map(sel => ({ id: sel.item.id, quantity: sel.quantityUsed })));
+
+      // Add cooking entry
+      await addCookingEntry(
+        {
+          dish_name: dishName.trim(),
+          cook_type: 'manual',
+          total_cost: totalCost,
+          servings: parseInt(servings) || 1,
+          rating_taste: ratingTaste,
+          rating_effort: ratingEffort,
+          rating_would_make_again: ratingAgain,
+          rating_spice_level: ratingSpice,
+          notes: notes || null,
+          recipe_id: null,
+        },
+        selectedIngredients.map(s => ({
+          inventory_item_name: s.item.name,
+          quantity_used: s.quantityUsed,
+          unit: s.item.unit,
+          cost: s.item.price_per_unit * s.quantityUsed,
+        }))
+      );
+
+      // Recalculate taste profile
+      await recalculateFromHistory();
+
+      Alert.alert('Dish Cooked!', `"${dishName}" has been logged.\nCost: ${currency}${totalCost.toFixed(2)}`, [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to cook');
+    } finally {
       setIsCooking(false);
-      return;
     }
-
-    // Consume ingredients from inventory (batch to avoid N+1 reloads)
-    const { consumeItems } = useInventoryStore.getState();
-    await consumeItems(selectedIngredients.map(sel => ({ id: sel.item.id, quantity: sel.quantityUsed })));
-
-    // Add cooking entry
-    await addCookingEntry(
-      {
-        dish_name: dishName.trim(),
-        cook_type: 'manual',
-        total_cost: totalCost,
-        servings: parseInt(servings) || 1,
-        rating_taste: ratingTaste,
-        rating_effort: ratingEffort,
-        rating_would_make_again: ratingAgain,
-        rating_spice_level: ratingSpice,
-        notes: notes || null,
-        recipe_id: null,
-      },
-      selectedIngredients.map(s => ({
-        inventory_item_name: s.item.name,
-        quantity_used: s.quantityUsed,
-        unit: s.item.unit,
-        cost: s.item.price_per_unit * s.quantityUsed,
-      }))
-    );
-
-    // Recalculate taste profile
-    await recalculateFromHistory();
-
-    Alert.alert('Dish Cooked!', `"${dishName}" has been logged.\nCost: ${currency}${totalCost.toFixed(2)}`, [
-      { text: 'OK', onPress: () => router.back() },
-    ]);
   };
 
   const StarSelector = ({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) => (

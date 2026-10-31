@@ -2,7 +2,7 @@
   "expo": {
     "name": "FridgeCook",
     "slug": "armaanical",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -27,9 +27,7 @@
       "package": "com.armaansiddiqui.fridgecook",
       "predictiveBackGestureEnabled": false
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/89b8005b-4473-4f0d-a120-33c94e33c6c3"
     },

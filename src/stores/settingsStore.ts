@@ -36,18 +36,18 @@ export interface Supermarket {
 
 export const DUBAI_SUPERMARKETS: Supermarket[] = [
   { id: 'carrefour', name: 'Carrefour', available: true },
-  { id: 'lulu', name: 'Lulu Hypermarket', available: false },
-  { id: 'spinneys', name: 'Spinneys', available: false },
-  { id: 'choithrams', name: 'Choithrams', available: false },
-  { id: 'waitrose', name: 'Waitrose', available: false },
-  { id: 'union_coop', name: 'Union Coop', available: false },
-  { id: 'al_maya', name: 'Al Maya', available: false },
-  { id: 'grandiose', name: 'Grandiose', available: false },
-  { id: 'west_zone', name: 'West Zone', available: false },
-  { id: 'viva', name: 'Viva Supermarket', available: false },
-  { id: 'nesto', name: 'Nesto', available: false },
-  { id: 'geant', name: 'Géant', available: false },
-  { id: 'kibsons', name: 'Kibsons (Online)', available: false },
+  { id: 'lulu', name: 'Lulu Hypermarket', available: true },
+  { id: 'spinneys', name: 'Spinneys', available: true },
+  { id: 'choithrams', name: 'Choithrams', available: true },
+  { id: 'waitrose', name: 'Waitrose', available: true },
+  { id: 'union_coop', name: 'Union Coop', available: true },
+  { id: 'al_maya', name: 'Al Maya', available: true },
+  { id: 'grandiose', name: 'Grandiose', available: true },
+  { id: 'west_zone', name: 'West Zone', available: true },
+  { id: 'viva', name: 'Viva Supermarket', available: true },
+  { id: 'nesto', name: 'Nesto', available: true },
+  { id: 'geant', name: 'Géant', available: true },
+  { id: 'kibsons', name: 'Kibsons (Online)', available: true },
 ];
 
 export interface KitchenAppliance {
@@ -77,6 +77,53 @@ export const KITCHEN_APPLIANCES: KitchenAppliance[] = [
   { id: 'induction', name: 'Induction Cooktop', icon: 'lightning-bolt' },
 ];
 
+export interface UserHealthProfile {
+  weight: number; // kg
+  height: number; // cm
+  age: number;
+  gender: 'male' | 'female';
+  activityLevel: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
+  goalType: 'maintain' | 'lose' | 'gain' | 'high_protein';
+}
+
+export const ACTIVITY_LEVELS = [
+  { id: 'sedentary', name: 'Sedentary', desc: 'Little to no exercise', multiplier: 1.2 },
+  { id: 'light', name: 'Lightly Active', desc: '1-3 days/week', multiplier: 1.375 },
+  { id: 'moderate', name: 'Moderately Active', desc: '3-5 days/week', multiplier: 1.55 },
+  { id: 'active', name: 'Active', desc: '6-7 days/week', multiplier: 1.725 },
+  { id: 'very_active', name: 'Very Active', desc: 'Intense daily exercise', multiplier: 1.9 },
+];
+
+export function calculateDailyNeeds(profile: UserHealthProfile) {
+  // Mifflin-St Jeor equation
+  let bmr: number;
+  if (profile.gender === 'male') {
+    bmr = 10 * profile.weight + 6.25 * profile.height - 5 * profile.age + 5;
+  } else {
+    bmr = 10 * profile.weight + 6.25 * profile.height - 5 * profile.age - 161;
+  }
+
+  const activity = ACTIVITY_LEVELS.find(a => a.id === profile.activityLevel);
+  const tdee = bmr * (activity?.multiplier || 1.2);
+
+  let calories = tdee;
+  if (profile.goalType === 'lose') calories = tdee - 500;
+  if (profile.goalType === 'gain') calories = tdee + 500;
+
+  // Protein: 0.8g/kg for sedentary, up to 2g/kg for high protein
+  let proteinPerKg = 0.8;
+  if (profile.activityLevel === 'light') proteinPerKg = 1.0;
+  if (profile.activityLevel === 'moderate') proteinPerKg = 1.2;
+  if (profile.activityLevel === 'active') proteinPerKg = 1.6;
+  if (profile.activityLevel === 'very_active') proteinPerKg = 1.8;
+  if (profile.goalType === 'high_protein') proteinPerKg = Math.max(proteinPerKg, 2.0);
+
+  return {
+    calories: Math.round(calories),
+    protein: Math.round(profile.weight * proteinPerKg),
+  };
+}
+
 interface SettingsState {
   themeMode: ThemeMode;
   selectedModel: string;
@@ -88,9 +135,11 @@ interface SettingsState {
   setCurrency: (currency: string) => Promise<void>;
   supermarket: string;
   appliances: string[];
+  healthProfile: UserHealthProfile | null;
   setSupermarket: (id: string) => Promise<void>;
   setAppliances: (ids: string[]) => Promise<void>;
   toggleAppliance: (id: string) => Promise<void>;
+  setHealthProfile: (profile: UserHealthProfile) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -99,16 +148,18 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   currency: '$',
   supermarket: 'carrefour',
   appliances: ['stove', 'microwave'],
+  healthProfile: null,
   isLoaded: false,
 
   loadSettings: async () => {
     try {
-      const [themeMode, selectedModel, currency, supermarket, appliances] = await Promise.all([
+      const [themeMode, selectedModel, currency, supermarket, appliances, healthProfile] = await Promise.all([
         AsyncStorage.getItem('theme_mode'),
         AsyncStorage.getItem('selected_model'),
         AsyncStorage.getItem('currency'),
         AsyncStorage.getItem('supermarket'),
         AsyncStorage.getItem('appliances'),
+        AsyncStorage.getItem('health_profile'),
       ]);
       // Migrate stale model IDs to current ones
       const validModels = AVAILABLE_MODELS.map(m => m.id);
@@ -124,6 +175,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         currency: currency || '$',
         supermarket: supermarket || 'carrefour',
         appliances: (() => { try { return appliances ? JSON.parse(appliances) : ['stove', 'microwave']; } catch { return ['stove', 'microwave']; } })(),
+        healthProfile: (() => { try { return healthProfile ? JSON.parse(healthProfile) : null; } catch { return null; } })(),
         isLoaded: true,
       });
     } catch {
@@ -154,6 +206,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAppliances: async (ids) => {
     await AsyncStorage.setItem('appliances', JSON.stringify(ids));
     set({ appliances: ids });
+  },
+
+  setHealthProfile: async (profile) => {
+    await AsyncStorage.setItem('health_profile', JSON.stringify(profile));
+    set({ healthProfile: profile });
   },
 
   toggleAppliance: async (id) => {

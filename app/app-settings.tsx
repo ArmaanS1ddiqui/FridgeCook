@@ -5,7 +5,7 @@ import {
   ActivityIndicator, Banner, Chip, Snackbar,
 } from 'react-native-paper';
 import { setApiKey, getApiKey, removeApiKey, testApiConnection } from '../src/services/aiService';
-import { useSettingsStore, AVAILABLE_MODELS, CURRENCIES, DUBAI_SUPERMARKETS, KITCHEN_APPLIANCES, ThemeMode } from '../src/stores/settingsStore';
+import { useSettingsStore, AVAILABLE_MODELS, CURRENCIES, DUBAI_SUPERMARKETS, KITCHEN_APPLIANCES, ACTIVITY_LEVELS, calculateDailyNeeds, ThemeMode } from '../src/stores/settingsStore';
 import { useNetwork } from '../src/hooks/useNetwork';
 import { useTheme } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -14,7 +14,7 @@ import { Stack } from 'expo-router';
 export default function AppSettingsScreen() {
   const theme = useTheme();
   const { isConnected } = useNetwork();
-  const { themeMode, selectedModel, currency, supermarket, appliances, setThemeMode, setSelectedModel, setCurrency, setSupermarket, toggleAppliance } = useSettingsStore();
+  const { themeMode, selectedModel, currency, supermarket, appliances, healthProfile, setThemeMode, setSelectedModel, setCurrency, setSupermarket, toggleAppliance, setHealthProfile } = useSettingsStore();
 
   const [apiKey, setApiKeyState] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
@@ -24,9 +24,28 @@ export default function AppSettingsScreen() {
   const [snackMessage, setSnackMessage] = useState('');
   const [showSnack, setShowSnack] = useState(false);
 
+  const [weight, setWeight] = useState(healthProfile?.weight?.toString() || '');
+  const [height, setHeight] = useState(healthProfile?.height?.toString() || '');
+  const [age, setAge] = useState(healthProfile?.age?.toString() || '');
+  const [gender, setGender] = useState<'male' | 'female'>(healthProfile?.gender || 'male');
+  const [activityLevel, setActivityLevel] = useState(healthProfile?.activityLevel || 'moderate');
+  const [goalType, setGoalType] = useState(healthProfile?.goalType || 'maintain');
+
   const showConfirmation = (msg: string) => {
     setSnackMessage(msg);
     setShowSnack(true);
+  };
+
+  const handleSaveHealth = async () => {
+    const w = parseFloat(weight);
+    const h = parseFloat(height);
+    const a = parseInt(age);
+    if (!w || w <= 0 || !h || h <= 0 || !a || a <= 0) {
+      showConfirmation('Please enter valid weight, height, and age');
+      return;
+    }
+    await setHealthProfile({ weight: w, height: h, age: a, gender, activityLevel: activityLevel as any, goalType: goalType as any });
+    showConfirmation('Health profile saved');
   };
 
   useEffect(() => {
@@ -224,6 +243,97 @@ export default function AppSettingsScreen() {
                 </Chip>
               ))}
             </View>
+          </Card.Content>
+        </Card>
+
+        {/* Health Profile */}
+        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+          <Card.Content>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="heart-pulse" size={20} color={theme.colors.primary} />
+              <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
+                Health Profile
+              </Text>
+            </View>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
+              For personalized calorie and protein recommendations
+            </Text>
+
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+              <TextInput label="Weight (kg)" value={weight} onChangeText={setWeight} keyboardType="numeric" mode="outlined" style={{ flex: 1 }} dense />
+              <TextInput label="Height (cm)" value={height} onChangeText={setHeight} keyboardType="numeric" mode="outlined" style={{ flex: 1 }} dense />
+              <TextInput label="Age" value={age} onChangeText={setAge} keyboardType="numeric" mode="outlined" style={{ flex: 1 }} dense />
+            </View>
+
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6 }}>Gender</Text>
+            <SegmentedButtons
+              value={gender}
+              onValueChange={(v) => setGender(v as 'male' | 'female')}
+              buttons={[
+                { value: 'male', label: 'Male' },
+                { value: 'female', label: 'Female' },
+              ]}
+              style={{ marginBottom: 12 }}
+            />
+
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6 }}>Activity Level</Text>
+            <View style={styles.currencyRow}>
+              {ACTIVITY_LEVELS.map(a => (
+                <Chip
+                  key={a.id}
+                  selected={activityLevel === a.id}
+                  onPress={() => setActivityLevel(a.id as typeof activityLevel)}
+                  style={[
+                    styles.currencyChip,
+                    activityLevel === a.id
+                      ? { backgroundColor: theme.colors.primaryContainer }
+                      : { backgroundColor: theme.colors.surfaceVariant },
+                  ]}
+                  textStyle={activityLevel === a.id ? { color: theme.colors.primary, fontWeight: '700' } : { color: theme.colors.onSurface }}
+                  compact
+                >
+                  {a.name}
+                </Chip>
+              ))}
+            </View>
+
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6, marginTop: 12 }}>Goal</Text>
+            <View style={styles.currencyRow}>
+              {[
+                { id: 'maintain', label: 'Maintain' },
+                { id: 'lose', label: 'Lose Weight' },
+                { id: 'gain', label: 'Gain Weight' },
+                { id: 'high_protein', label: 'High Protein' },
+              ].map(g => (
+                <Chip
+                  key={g.id}
+                  selected={goalType === g.id}
+                  onPress={() => setGoalType(g.id as typeof goalType)}
+                  style={[
+                    styles.currencyChip,
+                    goalType === g.id
+                      ? { backgroundColor: theme.colors.primaryContainer }
+                      : { backgroundColor: theme.colors.surfaceVariant },
+                  ]}
+                  textStyle={goalType === g.id ? { color: theme.colors.primary, fontWeight: '700' } : { color: theme.colors.onSurface }}
+                  compact
+                >
+                  {g.label}
+                </Chip>
+              ))}
+            </View>
+
+            {weight && age && (
+              <View style={{ backgroundColor: theme.colors.primaryContainer, padding: 12, borderRadius: 12, marginTop: 12 }}>
+                <Text variant="bodySmall" style={{ color: theme.colors.primary, fontWeight: '700' }}>
+                  Daily needs: {calculateDailyNeeds({ weight: parseFloat(weight) || 70, height: parseFloat(height) || 170, age: parseInt(age) || 25, gender, activityLevel: activityLevel as any, goalType: goalType as any }).calories} cal • {calculateDailyNeeds({ weight: parseFloat(weight) || 70, height: parseFloat(height) || 170, age: parseInt(age) || 25, gender, activityLevel: activityLevel as any, goalType: goalType as any }).protein}g protein
+                </Text>
+              </View>
+            )}
+
+            <Button mode="contained" onPress={handleSaveHealth} style={{ marginTop: 12, borderRadius: 12 }} buttonColor={theme.colors.primary}>
+              Save Health Profile
+            </Button>
           </Card.Content>
         </Card>
 

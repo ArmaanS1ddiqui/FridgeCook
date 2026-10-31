@@ -146,58 +146,62 @@ export default function RecipeDetailScreen() {
   const handleFinishCooking = async () => {
     if (isFinishing) return;
     setIsFinishing(true);
+    try {
+      if (ratingTaste === 0) {
+        Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
+        return;
+      }
 
-    if (ratingTaste === 0) {
-      Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
+      // Use pre-calculated costs passed from ai-cook, or calculate from current inventory
+      let totalCost = 0;
+      let parsedCostData: Record<string, number> = {};
+      if (totalCostParam) {
+        totalCost = parseFloat(totalCostParam) || 0;
+      }
+      if (costDataParam) {
+        try { parsedCostData = JSON.parse(decodeURIComponent(costDataParam)); } catch {}
+      }
+      if (totalCost === 0) {
+        // Fallback: calculate from current inventory
+        const inventoryItems = useInventoryStore.getState().items;
+        ingredients.forEach(i => {
+          const invItem = inventoryItems.find(inv => inv.name.toLowerCase() === i.name.toLowerCase());
+          const cost = invItem ? invItem.price_per_unit * i.quantity : 0;
+          totalCost += cost;
+          parsedCostData[i.name] = cost;
+        });
+      }
+
+      await addCookingEntry(
+        {
+          dish_name: recipe.name,
+          cook_type: (cookType as 'manual' | 'ai_inventory' | 'ai_extras') || 'ai_inventory',
+          total_cost: totalCost,
+          servings: recipe.servings,
+          rating_taste: ratingTaste,
+          rating_effort: ratingEffort,
+          rating_would_make_again: ratingAgain,
+          rating_spice_level: ratingSpice,
+          notes: null,
+          recipe_id: recipe.id,
+        },
+        ingredients.map(i => ({
+          inventory_item_name: i.name,
+          quantity_used: i.quantity,
+          unit: i.unit,
+          cost: parsedCostData[i.name] || 0,
+        }))
+      );
+
+      await recalculateFromHistory();
+      Alert.alert('Dish Complete!', `"${recipe.name}" has been logged!`, [
+        { text: 'OK', onPress: () => router.replace('/cooking-history') },
+      ]);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to finish cooking');
+    } finally {
       setIsFinishing(false);
-      return;
     }
-
-    // Use pre-calculated costs passed from ai-cook, or calculate from current inventory
-    let totalCost = 0;
-    let parsedCostData: Record<string, number> = {};
-    if (totalCostParam) {
-      totalCost = parseFloat(totalCostParam) || 0;
-    }
-    if (costDataParam) {
-      try { parsedCostData = JSON.parse(decodeURIComponent(costDataParam)); } catch {}
-    }
-    if (totalCost === 0) {
-      // Fallback: calculate from current inventory
-      const inventoryItems = useInventoryStore.getState().items;
-      ingredients.forEach(i => {
-        const invItem = inventoryItems.find(inv => inv.name.toLowerCase() === i.name.toLowerCase());
-        const cost = invItem ? invItem.price_per_unit * i.quantity : 0;
-        totalCost += cost;
-        parsedCostData[i.name] = cost;
-      });
-    }
-
-    await addCookingEntry(
-      {
-        dish_name: recipe.name,
-        cook_type: (cookType as 'manual' | 'ai_inventory' | 'ai_extras') || 'ai_inventory',
-        total_cost: totalCost,
-        servings: recipe.servings,
-        rating_taste: ratingTaste,
-        rating_effort: ratingEffort,
-        rating_would_make_again: ratingAgain,
-        rating_spice_level: ratingSpice,
-        notes: null,
-        recipe_id: recipe.id,
-      },
-      ingredients.map(i => ({
-        inventory_item_name: i.name,
-        quantity_used: i.quantity,
-        unit: i.unit,
-        cost: parsedCostData[i.name] || 0,
-      }))
-    );
-
-    await recalculateFromHistory();
-    Alert.alert('Dish Complete!', `"${recipe.name}" has been logged!`, [
-      { text: 'OK', onPress: () => router.replace('/cooking-history') },
-    ]);
   };
 
   const StarSelector = ({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) => (
