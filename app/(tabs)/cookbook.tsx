@@ -1,18 +1,18 @@
-import { useEffect } from 'react';
+import { useCallback } from 'react';
 import { View, FlatList, StyleSheet, Alert } from 'react-native';
 import { Card, Text, IconButton, Chip, FAB, useTheme } from 'react-native-paper';
 import { useRecipeStore, SavedRecipe } from '../../src/stores/recipeStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 
 export default function CookbookScreen() {
   const theme = useTheme();
   const { recipes, isLoading, loadRecipes, toggleFavorite, deleteRecipe } = useRecipeStore();
   const router = useRouter();
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadRecipes();
-  }, []);
+  }, []));
 
   const renderItem = ({ item }: { item: SavedRecipe }) => {
     let ingredients: any[] = [];

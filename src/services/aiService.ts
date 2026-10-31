@@ -177,7 +177,7 @@ Sort recipes by match_score descending (best matches first).`;
   }
 }
 
-export async function parseGroceryReceipt(base64Image: string): Promise<Array<{
+export async function parseGroceryReceipt(base64Image: string, mimeType: string = 'image/jpeg'): Promise<Array<{
   name: string;
   quantity: number;
   unit: string;
@@ -197,7 +197,7 @@ Return ONLY valid JSON array (no markdown, no code blocks):
     "quantity": number,
     "unit": "kg/g/L/ml/pcs",
     "price": total_price_number,
-    "category": "Protein/Dairy/Vegetable/Fruit/Grain/Spice/Beverage/Snack/Condiment/Other"
+    "category": "Protein/Dairy/Vegetable/Fruit/Grain/Spice/Beverage/Snack/Condiment/Frozen/Other"
   }
 ]
 
@@ -205,6 +205,10 @@ Rules:
 - Convert abbreviated names to full readable names
 - If quantity isn't clear, default to 1 pcs
 - Price should be the total price for that line item
+- Price must be a plain number (no currency symbols), use period as decimal separator
+- SKIP subtotals, totals, tax, VAT, discounts, bag fees, and loyalty points
+- For weighted items, calculate total line price
+- If receipt is non-English, translate item names to English
 - Categorize each item appropriately
 - Skip non-food items`;
 
@@ -212,7 +216,7 @@ Rules:
     prompt,
     {
       inlineData: {
-        mimeType: 'image/jpeg',
+        mimeType: mimeType,
         data: base64Image,
       },
     },

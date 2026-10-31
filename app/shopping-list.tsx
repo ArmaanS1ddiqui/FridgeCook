@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { View, FlatList, StyleSheet, Alert } from 'react-native';
 import { Text, Card, IconButton, FAB, Button, Chip, TextInput, useTheme } from 'react-native-paper';
 import { useShoppingStore, ShoppingItem } from '../src/stores/shoppingStore';
 import { useInventoryStore } from '../src/stores/inventoryStore';
-import { Stack } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { useSettingsStore } from '../src/stores/settingsStore';
@@ -14,13 +14,14 @@ export default function ShoppingListScreen() {
   const { addItem: addToInventory } = useInventoryStore();
   const { currency } = useSettingsStore();
   const [showAdd, setShowAdd] = useState(false);
+  const [isPurchasing, setIsPurchasing] = useState(false);
   const [newName, setNewName] = useState('');
   const [newQuantity, setNewQuantity] = useState('1');
   const [newUnit, setNewUnit] = useState('pcs');
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadItems();
-  }, []);
+  }, []));
 
   const unpurchased = items.filter(i => !i.is_purchased);
   const purchased = items.filter(i => i.is_purchased);
@@ -43,18 +44,23 @@ export default function ShoppingListScreen() {
   };
 
   const handlePurchaseAndAdd = async (item: ShoppingItem) => {
-    await togglePurchased(item.id);
-    // Also add to fridge inventory
-    await addToInventory({
-      name: item.name,
-      quantity: item.quantity,
-      unit: item.unit,
-      category: item.category,
-      price_per_unit: item.estimated_price,
-      total_price: item.estimated_price * item.quantity,
-      expiry_date: null,
-      notes: 'Added from shopping list',
-    });
+    if (isPurchasing) return;
+    setIsPurchasing(true);
+    try {
+      await togglePurchased(item.id);
+      await addToInventory({
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+        category: item.category,
+        price_per_unit: item.estimated_price,
+        total_price: item.estimated_price * item.quantity,
+        expiry_date: null,
+        notes: 'Added from shopping list',
+      });
+    } finally {
+      setIsPurchasing(false);
+    }
   };
 
   const renderItem = ({ item }: { item: ShoppingItem }) => (

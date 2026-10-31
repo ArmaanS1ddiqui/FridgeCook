@@ -23,7 +23,7 @@ export default function AddItemScreen() {
   const [quantity, setQuantity] = useState(editingItem?.quantity?.toString() || '');
   const [unit, setUnit] = useState(editingItem?.unit || 'pcs');
   const [category, setCategory] = useState(editingItem?.category || 'Other');
-  const [price, setPrice] = useState(editingItem ? editingItem.total_price.toString() : '');
+  const [price, setPrice] = useState(editingItem && editingItem.total_price > 0 ? editingItem.total_price.toString() : '');
   const [expiry, setExpiry] = useState(editingItem?.expiry_date || '');
   const [notes, setNotes] = useState(editingItem?.notes || '');
   const [priceIsTotal, setPriceIsTotal] = useState(true);
@@ -72,6 +72,7 @@ export default function AddItemScreen() {
           unit,
           category,
           price_per_unit: computedUnitPrice,
+          total_price: computedTotalPrice,
           expiry_date: expiry || null,
           notes: notes || null,
         });

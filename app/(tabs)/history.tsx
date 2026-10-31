@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useCallback } from 'react';
 import { View, FlatList, StyleSheet } from 'react-native';
 import { Card, Text, Chip, useTheme } from 'react-native-paper';
 import { useCookingStore, CookingHistoryItem } from '../../src/stores/cookingStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { useSettingsStore } from '../../src/stores/settingsStore';
+import { useFocusEffect } from 'expo-router';
 
 function StarRating({ rating, label }: { rating: number; label: string }) {
   const theme = useTheme();
@@ -30,9 +31,9 @@ export default function HistoryScreen() {
   const { history, isLoading, loadHistory } = useCookingStore();
   const { currency } = useSettingsStore();
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadHistory();
-  }, []);
+  }, []));
 
   const renderItem = ({ item }: { item: CookingHistoryItem }) => {
     const cookTypeLabel = {

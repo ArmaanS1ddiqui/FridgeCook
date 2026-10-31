@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Alert } from 'react-native';
-import { Text, Card, Button, Chip, IconButton, Divider, useTheme, ProgressBar } from 'react-native-paper';
+import { Text, Card, Button, Chip, IconButton, Divider, useTheme, ProgressBar, ActivityIndicator } from 'react-native-paper';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { useRecipeStore, RecipeIngredient, RecipeStep } from '../src/stores/recipeStore';
 import { useCookingStore } from '../src/stores/cookingStore';
@@ -9,9 +9,8 @@ import { useInventoryStore } from '../src/stores/inventoryStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 function StepTimer({ minutes }: { minutes: number }) {
-  if (!minutes || minutes <= 0) return null;
   const theme = useTheme();
-  const [secondsLeft, setSecondsLeft] = useState(minutes * 60);
+  const [secondsLeft, setSecondsLeft] = useState((minutes || 0) * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
 
@@ -32,6 +31,8 @@ function StepTimer({ minutes }: { minutes: number }) {
     }
     return () => clearInterval(interval);
   }, [isRunning, secondsLeft]);
+
+  if (!minutes || minutes <= 0) return null;
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -99,8 +100,8 @@ function StepTimer({ minutes }: { minutes: number }) {
 
 export default function RecipeDetailScreen() {
   const theme = useTheme();
-  const { id, cooking } = useLocalSearchParams<{ id: string; cooking?: string }>();
-  const { recipes, loadRecipes } = useRecipeStore();
+  const { id, cooking, costData: costDataParam, totalCost: totalCostParam, cookType } = useLocalSearchParams<{ id: string; cooking?: string; costData?: string; totalCost?: string; cookType?: string }>();
+  const { recipes, loadRecipes, isLoading: recipesLoading } = useRecipeStore();
   const { addCookingEntry } = useCookingStore();
   const { recalculateFromHistory } = useProfileStore();
   const router = useRouter();
@@ -111,10 +112,20 @@ export default function RecipeDetailScreen() {
   const [ratingAgain, setRatingAgain] = useState(0);
   const [ratingSpice, setRatingSpice] = useState(0);
   const [showRating, setShowRating] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
 
   useEffect(() => { loadRecipes(); }, []);
 
   const recipe = recipes.find(r => r.id === id);
+
+  if (recipesLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
+        <Stack.Screen options={{ headerShown: true, title: 'Loading...', headerStyle: { backgroundColor: theme.colors.surface }, headerTintColor: theme.colors.onSurface }} />
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+      </View>
+    );
+  }
 
   if (!recipe) {
     return (
@@ -133,20 +144,39 @@ export default function RecipeDetailScreen() {
   const totalTime = recipe.prep_time_minutes + recipe.cook_time_minutes;
 
   const handleFinishCooking = async () => {
-    // Calculate cost from inventory
-    const inventoryItems = useInventoryStore.getState().items;
+    if (isFinishing) return;
+    setIsFinishing(true);
+
+    if (ratingTaste === 0) {
+      Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
+      setIsFinishing(false);
+      return;
+    }
+
+    // Use pre-calculated costs passed from ai-cook, or calculate from current inventory
     let totalCost = 0;
-    const ingredientsWithCost = ingredients.map(i => {
-      const invItem = inventoryItems.find(inv => inv.name.toLowerCase() === i.name.toLowerCase());
-      const cost = invItem ? invItem.price_per_unit * i.quantity : 0;
-      totalCost += cost;
-      return { ...i, cost };
-    });
+    let parsedCostData: Record<string, number> = {};
+    if (totalCostParam) {
+      totalCost = parseFloat(totalCostParam) || 0;
+    }
+    if (costDataParam) {
+      try { parsedCostData = JSON.parse(decodeURIComponent(costDataParam)); } catch {}
+    }
+    if (totalCost === 0) {
+      // Fallback: calculate from current inventory
+      const inventoryItems = useInventoryStore.getState().items;
+      ingredients.forEach(i => {
+        const invItem = inventoryItems.find(inv => inv.name.toLowerCase() === i.name.toLowerCase());
+        const cost = invItem ? invItem.price_per_unit * i.quantity : 0;
+        totalCost += cost;
+        parsedCostData[i.name] = cost;
+      });
+    }
 
     await addCookingEntry(
       {
         dish_name: recipe.name,
-        cook_type: 'ai_inventory',
+        cook_type: (cookType as 'manual' | 'ai_inventory' | 'ai_extras') || 'ai_inventory',
         total_cost: totalCost,
         servings: recipe.servings,
         rating_taste: ratingTaste,
@@ -156,11 +186,11 @@ export default function RecipeDetailScreen() {
         notes: null,
         recipe_id: recipe.id,
       },
-      ingredientsWithCost.map(i => ({
+      ingredients.map(i => ({
         inventory_item_name: i.name,
         quantity_used: i.quantity,
         unit: i.unit,
-        cost: i.cost,
+        cost: parsedCostData[i.name] || 0,
       }))
     );
 
@@ -305,7 +335,7 @@ export default function RecipeDetailScreen() {
               <StarSelector value={ratingEffort} onChange={setRatingEffort} label="Effort vs Result" />
               <StarSelector value={ratingAgain} onChange={setRatingAgain} label="Would Make Again" />
               <StarSelector value={ratingSpice} onChange={setRatingSpice} label="Spice Level" />
-              <Button mode="contained" onPress={handleFinishCooking} style={{ marginTop: 12 }}>
+              <Button mode="contained" onPress={handleFinishCooking} style={{ marginTop: 12 }} disabled={isFinishing} loading={isFinishing}>
                 Log & Finish
               </Button>
             </Card.Content>

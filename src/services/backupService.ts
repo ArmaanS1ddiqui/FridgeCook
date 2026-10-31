@@ -60,8 +60,15 @@ export async function importBackup(): Promise<boolean> {
     const content = await FileSystem.readAsStringAsync(fileUri);
     const backup = JSON.parse(content);
 
-    if (!backup.data) {
+    if (!backup.data || typeof backup.data !== 'object') {
       Alert.alert('Invalid Backup', 'This file is not a valid FridgeCook backup');
+      return false;
+    }
+    // Validate expected tables exist
+    const expectedTables = ['inventory_items', 'cooking_history', 'saved_recipes'];
+    const hasData = expectedTables.some(t => Array.isArray(backup.data[t]) && backup.data[t].length > 0);
+    if (!hasData) {
+      Alert.alert('Empty Backup', 'This backup file contains no data to restore');
       return false;
     }
 

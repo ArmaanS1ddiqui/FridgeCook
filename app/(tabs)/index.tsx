@@ -1,28 +1,25 @@
-import { useState, useEffect, useMemo } from 'react';
-import { View, FlatList, StyleSheet, Alert, RefreshControl, ScrollView } from 'react-native';
+import { useState, useMemo, useCallback } from 'react';
+import { View, FlatList, StyleSheet, Alert, RefreshControl } from 'react-native';
 import {
   FAB, Searchbar, Card, Text, Chip, IconButton, Portal, Modal,
-  Button, TextInput, Menu, Switch, useTheme, Snackbar,
+  Button, TextInput, Menu, useTheme, Snackbar,
 } from 'react-native-paper';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useInventoryStore, InventoryItem } from '../../src/stores/inventoryStore';
-import { CATEGORIES, UNITS, CATEGORY_COLORS } from '../../src/constants/theme';
+import { CATEGORIES, CATEGORY_COLORS } from '../../src/constants/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 
 export default function FridgeScreen() {
   const theme = useTheme();
   const { currency } = useSettingsStore();
-  const { items, isLoading, totalValue, loadItems, addItem, deleteItem, updateItem } = useInventoryStore();
+  const { items, isLoading, totalValue, loadItems, deleteItem, updateItem } = useInventoryStore();
   const [search, setSearch] = useState('');
-  const [showAddModal, setShowAddModal] = useState(false);
   const [showMergeMode, setShowMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<string[]>([]);
   const [showMergeNameModal, setShowMergeNameModal] = useState(false);
   const [mergeName, setMergeName] = useState('');
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
-  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const router = useRouter();
 
   // Bulk select mode
@@ -30,23 +27,11 @@ export default function FridgeScreen() {
   const [bulkSelected, setBulkSelected] = useState<string[]>([]);
   const [showBulkCategoryMenu, setShowBulkCategoryMenu] = useState(false);
 
-  // Add form state
-  const [newName, setNewName] = useState('');
-  const [newQuantity, setNewQuantity] = useState('');
-  const [newUnit, setNewUnit] = useState('pcs');
-  const [newCategory, setNewCategory] = useState('Other');
-  const [newPrice, setNewPrice] = useState('');
-  const [newExpiry, setNewExpiry] = useState('');
-  const [newNotes, setNewNotes] = useState('');
-  const [showUnitMenu, setShowUnitMenu] = useState(false);
-  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [priceIsTotal, setPriceIsTotal] = useState(true); // true = total price, false = unit price
   const [snackMsg, setSnackMsg] = useState('');
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadItems();
-  }, []);
+  }, []));
 
   const filteredItems = useMemo(() => items.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(search.toLowerCase());
@@ -79,94 +64,8 @@ export default function FridgeScreen() {
   // Round to 2 decimal places safely
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-  // Auto-calculate price
-  const computedUnitPrice = useMemo(() => {
-    const qty = parseFloat(newQuantity) || 0;
-    const price = parseFloat(newPrice) || 0;
-    if (priceIsTotal) {
-      return qty > 0 ? round2(price / qty) : 0;
-    }
-    return price;
-  }, [newQuantity, newPrice, priceIsTotal]);
-
-  const computedTotalPrice = useMemo(() => {
-    const qty = parseFloat(newQuantity) || 0;
-    const price = parseFloat(newPrice) || 0;
-    if (priceIsTotal) {
-      return round2(price);
-    }
-    return round2(price * qty);
-  }, [newQuantity, newPrice, priceIsTotal]);
-
-  const resetForm = () => {
-    setNewName('');
-    setNewQuantity('');
-    setNewUnit('pcs');
-    setNewCategory('Other');
-    setNewPrice('');
-    setNewExpiry('');
-    setNewNotes('');
-    setEditingItem(null);
-    setPriceIsTotal(true);
-    setShowDatePicker(false);
-  };
-
-  const handleSaveItem = async () => {
-    if (!newName.trim()) {
-      Alert.alert('Error', 'Please enter an item name');
-      return;
-    }
-    const qty = parseFloat(newQuantity);
-    if (!qty || qty <= 0) {
-      Alert.alert('Error', 'Please enter a valid quantity');
-      return;
-    }
-
-    const unitPrice = computedUnitPrice;
-    const totalPrice = computedTotalPrice;
-
-    if (editingItem) {
-      await updateItem(editingItem.id, {
-        name: newName.trim(),
-        quantity: qty,
-        unit: newUnit,
-        category: newCategory,
-        price_per_unit: unitPrice,
-        expiry_date: newExpiry || null,
-        notes: newNotes || null,
-      });
-    } else {
-      await addItem({
-        name: newName.trim(),
-        quantity: qty,
-        unit: newUnit,
-        category: newCategory,
-        price_per_unit: unitPrice,
-        total_price: totalPrice,
-        expiry_date: newExpiry || null,
-        notes: newNotes || null,
-      });
-    }
-
-    resetForm();
-    setShowAddModal(false);
-  };
-
   const handleStartEdit = (item: InventoryItem) => {
     router.push(`/add-item?editId=${item.id}`);
-    return;
-    // Legacy modal code below — kept for reference
-    setEditingItem(item);
-    setNewName(item.name);
-    setNewQuantity(item.quantity.toString());
-    setNewUnit(item.unit);
-    setNewCategory(item.category);
-    // Show total price by default when editing
-    setPriceIsTotal(true);
-    setNewPrice(item.total_price.toString());
-    setNewExpiry(item.expiry_date || '');
-    setNewNotes(item.notes || '');
-    setShowAddModal(true);
   };
 
   const handleMergeToggle = (id: string) => {
@@ -280,7 +179,7 @@ export default function FridgeScreen() {
               </View>
               <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
                 {item.unit === '%' ? `${item.quantity}%` : `${item.quantity} ${item.unit}`} • {item.category}
-                {item.price_per_unit > 0 && ` • ${currency}${round2(item.price_per_unit)}/${item.unit}`}
+                {item.price_per_unit > 0 && item.unit !== '%' && ` • ${currency}${round2(item.price_per_unit)}/${item.unit}`}
                 {item.expiry_date && (
                   isExpired ? ' • EXPIRED' :
                   isExpiring ? ' • Expiring soon!' : ''
@@ -410,6 +309,35 @@ export default function FridgeScreen() {
               <Menu.Item key={c} onPress={() => handleBulkCategoryAssign(c)} title={c} />
             ))}
           </Menu>
+          <Button
+            mode="outlined"
+            onPress={() => {
+              if (bulkSelected.length === 0) return;
+              Alert.alert(
+                'Delete Items',
+                `Delete ${bulkSelected.length} selected items?`,
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                      for (const id of bulkSelected) {
+                        await deleteItem(id);
+                      }
+                      setBulkSelected([]);
+                      setBulkSelectMode(false);
+                      setSnackMsg(`${bulkSelected.length} items deleted`);
+                    },
+                  },
+                ]
+              );
+            }}
+            textColor={theme.colors.error}
+            compact
+          >
+            Delete
+          </Button>
           <Button mode="outlined" onPress={() => { setBulkSelectMode(false); setBulkSelected([]); }} compact>
             Cancel
           </Button>
@@ -462,165 +390,6 @@ export default function FridgeScreen() {
           />
         </View>
       )}
-
-      {/* Add/Edit Item Modal */}
-      <Portal>
-        <Modal
-          visible={showAddModal}
-          onDismiss={() => { setShowAddModal(false); resetForm(); }}
-          contentContainerStyle={[styles.modal, { backgroundColor: theme.colors.surface, maxHeight: '90%' }]}
-        >
-          <Text variant="headlineSmall" style={[styles.modalTitle, { color: theme.colors.onSurface }]}>
-            {editingItem ? 'Edit Item' : 'Add Item'}
-          </Text>
-
-          <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
-            <TextInput
-              label="Item Name"
-              value={newName}
-              onChangeText={setNewName}
-              mode="outlined"
-              style={styles.input}
-            />
-
-            <View style={styles.row}>
-              <TextInput
-                label="Quantity"
-                value={newQuantity}
-                onChangeText={setNewQuantity}
-                keyboardType="numeric"
-                mode="outlined"
-                style={[styles.input, { flex: 1, marginRight: 8 }]}
-              />
-              <Menu
-                visible={showUnitMenu}
-                onDismiss={() => setShowUnitMenu(false)}
-                anchor={
-                  <Button mode="outlined" onPress={() => setShowUnitMenu(true)} style={styles.unitButton}>
-                    {newUnit}
-                  </Button>
-                }
-              >
-                {UNITS.map(u => (
-                  <Menu.Item key={u} onPress={() => { setNewUnit(u); setShowUnitMenu(false); }} title={u} />
-                ))}
-              </Menu>
-            </View>
-
-            <Menu
-              visible={showCategoryMenu}
-              onDismiss={() => setShowCategoryMenu(false)}
-              anchor={
-                <Button mode="outlined" onPress={() => setShowCategoryMenu(true)} style={[styles.input, styles.categoryButton]}>
-                  Category: {newCategory}
-                </Button>
-              }
-            >
-              {CATEGORIES.map(c => (
-                <Menu.Item key={c} onPress={() => { setNewCategory(c); setShowCategoryMenu(false); }} title={c} />
-              ))}
-            </Menu>
-
-            {/* Price input with toggle */}
-            <View style={styles.priceToggleRow}>
-              <Text variant="bodySmall" style={{ color: priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
-                Total Price
-              </Text>
-              <Switch
-                value={!priceIsTotal}
-                onValueChange={(v) => {
-                  // Convert price when toggling
-                  const qty = parseFloat(newQuantity) || 0;
-                  const price = parseFloat(newPrice) || 0;
-                  if (v && qty > 0 && price > 0) {
-                    // Switching to unit price: convert total → unit
-                    setNewPrice(round2(price / qty).toString());
-                  } else if (!v && qty > 0 && price > 0) {
-                    // Switching to total price: convert unit → total
-                    setNewPrice(round2(price * qty).toString());
-                  }
-                  setPriceIsTotal(!v);
-                }}
-                color={theme.colors.primary}
-              />
-              <Text variant="bodySmall" style={{ color: !priceIsTotal ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
-                Unit Price
-              </Text>
-            </View>
-
-            <TextInput
-              label={priceIsTotal ? `Total Price (${currency})` : `Price per unit (${currency})`}
-              value={newPrice}
-              onChangeText={setNewPrice}
-              keyboardType="numeric"
-              mode="outlined"
-              style={styles.input}
-            />
-
-            {/* Auto-calculated display */}
-            {(parseFloat(newPrice) > 0 && parseFloat(newQuantity) > 0) && (
-              <View style={[styles.calcRow, { backgroundColor: theme.colors.primaryContainer }]}>
-                <MaterialCommunityIcons name="calculator" size={16} color={theme.colors.primary} />
-                <Text variant="bodySmall" style={{ color: theme.colors.primary, marginLeft: 6 }}>
-                  {priceIsTotal
-                    ? `Unit price: ${currency}${computedUnitPrice.toFixed(2)} per ${newUnit}`
-                    : `Total: ${currency}${computedTotalPrice.toFixed(2)} for ${newQuantity} ${newUnit}`
-                  }
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.input}>
-              <Button
-                mode="outlined"
-                onPress={() => setShowDatePicker(true)}
-                icon="calendar"
-                contentStyle={{ justifyContent: 'flex-start' }}
-                style={{ borderRadius: 4 }}
-              >
-                {newExpiry ? `Expiry: ${newExpiry.split('-').reverse().join('/')}` : 'Expiry Date — optional'}
-              </Button>
-              {newExpiry ? (
-                <Button mode="text" onPress={() => setNewExpiry('')} compact textColor={theme.colors.error}>
-                  Clear expiry
-                </Button>
-              ) : null}
-            </View>
-            {showDatePicker && (
-              <DateTimePicker
-                value={newExpiry ? new Date(newExpiry) : new Date()}
-                mode="date"
-                display="default"
-                minimumDate={new Date()}
-                onChange={(event: any, selectedDate?: Date) => {
-                  setShowDatePicker(false);
-                  if (event.type === 'set' && selectedDate) {
-                    setNewExpiry(selectedDate.toISOString().split('T')[0]);
-                  }
-                }}
-              />
-            )}
-
-            <TextInput
-              label="Notes (optional)"
-              value={newNotes}
-              onChangeText={setNewNotes}
-              mode="outlined"
-              style={styles.input}
-              multiline
-            />
-
-            <View style={styles.modalButtons}>
-              <Button mode="outlined" onPress={() => { setShowAddModal(false); resetForm(); }}>
-                Cancel
-              </Button>
-              <Button mode="contained" onPress={handleSaveItem}>
-                {editingItem ? 'Update' : 'Add'}
-              </Button>
-            </View>
-          </ScrollView>
-        </Modal>
-      </Portal>
 
       {/* Merge Name Modal */}
       <Portal>
@@ -725,24 +494,6 @@ const styles = StyleSheet.create({
   modal: { margin: 20, padding: 24, borderRadius: 16, maxHeight: '85%' },
   modalTitle: { fontWeight: '700', marginBottom: 16 },
   input: { marginBottom: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 0 },
-  unitButton: { marginTop: -4, minWidth: 70 },
-  categoryButton: { justifyContent: 'center' },
   modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 8 },
   mergeChip: { marginBottom: 6, alignSelf: 'flex-start' },
-  priceToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  calcRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 10,
-    marginBottom: 12,
-    marginTop: -4,
-  },
 });

@@ -40,8 +40,7 @@ export default function SettingsScreen() {
       icon: 'download-outline' as const,
       onPress: async () => {
         setIsBackingUp(true);
-        await exportBackup();
-        setIsBackingUp(false);
+        try { await exportBackup(); } finally { setIsBackingUp(false); }
       },
       color: theme.colors.primary,
     },
@@ -60,10 +59,13 @@ export default function SettingsScreen() {
               style: 'destructive',
               onPress: async () => {
                 setIsBackingUp(true);
-                const success = await importBackup();
-                setIsBackingUp(false);
-                if (success) {
-                  Alert.alert('Success', 'Backup restored! Restart the app to see changes.');
+                try {
+                  const success = await importBackup();
+                  if (success) {
+                    Alert.alert('Success', 'Backup restored! Restart the app to see changes.');
+                  }
+                } finally {
+                  setIsBackingUp(false);
                 }
               },
             },
@@ -115,7 +117,7 @@ export default function SettingsScreen() {
           </Text>
         </View>
         <Text variant="bodySmall" style={{ color: theme.colors.outlineVariant, marginTop: 12, textAlign: 'center' }}>
-          FridgeCook v1.4.0 — All data stored locally
+          FridgeCook v1.5.0 — All data stored locally
         </Text>
       </View>
 

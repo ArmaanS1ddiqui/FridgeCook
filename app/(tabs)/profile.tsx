@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet } from 'react-native';
 import { Card, Text, TextInput, Button, Chip, ProgressBar, Divider, useTheme } from 'react-native-paper';
 import { useProfileStore } from '../../src/stores/profileStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 
 function ProfileBar({ label, value, color }: { label: string; value: number; color: string }) {
   const theme = useTheme();
@@ -23,9 +24,9 @@ export default function ProfileScreen() {
   const [newRestriction, setNewRestriction] = useState('');
   const [newAllergy, setNewAllergy] = useState('');
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadProfile();
-  }, []);
+  }, []));
 
   const addRestriction = () => {
     if (!newRestriction.trim() || !profile) return;

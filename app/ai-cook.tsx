@@ -10,12 +10,12 @@ import { useCookingStore } from '../src/stores/cookingStore';
 import { getRecipeSuggestions, AIRecipeSuggestion } from '../src/services/aiService';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { preflightCheck } from '../src/hooks/usePreflightCheck';
-import { useSettingsStore } from '../src/stores/settingsStore';
+import { useSettingsStore, KITCHEN_APPLIANCES, DUBAI_SUPERMARKETS } from '../src/stores/settingsStore';
 
 export default function AICookScreen() {
   const theme = useTheme();
   const { mode } = useLocalSearchParams<{ mode: 'inventory' | 'extras' }>();
-  const { items: inventory, loadItems, consumeItem, addItem } = useInventoryStore();
+  const { items: inventory, loadItems, addItem } = useInventoryStore();
   const { profile, loadProfile } = useProfileStore();
   const { saveRecipe } = useRecipeStore();
   const { addFromRecipe } = useShoppingStore();
@@ -33,6 +33,7 @@ export default function AICookScreen() {
   const [buyModalVisible, setBuyModalVisible] = useState(false);
   const [buyingIngredient, setBuyingIngredient] = useState<AIRecipeSuggestion['ingredients'][0] | null>(null);
   const [buyQuantity, setBuyQuantity] = useState('');
+  const [isCooking, setIsCooking] = useState(false);
 
   const allowExtras = mode === 'extras';
   const title = allowExtras ? 'AI Cook + Extras' : 'AI Cook';
@@ -74,8 +75,8 @@ export default function AICookScreen() {
           allergies: profile.allergies,
         } : undefined,
         servings,
-        appliances: userAppliances,
-        supermarket: userSupermarket,
+        appliances: userAppliances.map(id => KITCHEN_APPLIANCES.find(a => a.id === id)?.name || id),
+        supermarket: DUBAI_SUPERMARKETS.find(s => s.id === userSupermarket)?.name || userSupermarket,
       });
       setSuggestions(results);
     } catch (error: any) {
@@ -134,6 +135,7 @@ export default function AICookScreen() {
   };
 
   const handleCookRecipe = async () => {
+    if (isCooking) return;
     if (!selectedRecipe) return;
 
     // Check all unavailable items are bought
@@ -142,15 +144,31 @@ export default function AICookScreen() {
       Alert.alert('Missing Items', `You still need: ${unbought.map(i => i.name).join(', ')}`);
       return;
     }
+    setIsCooking(true);
 
-    // Consume inventory items
+    // Calculate costs BEFORE consuming (items may be deleted after consumption)
+    const costData: Record<string, number> = {};
+    let totalRecipeCost = 0;
     for (const ing of selectedRecipe.ingredients) {
       if (ing.available) {
-        const inventoryItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
-        if (inventoryItem) {
-          await consumeItem(inventoryItem.id, Math.min(ing.quantity, inventoryItem.quantity));
-        }
+        const invItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
+        const cost = invItem ? invItem.price_per_unit * ing.quantity : 0;
+        costData[ing.name] = cost;
+        totalRecipeCost += cost;
       }
+    }
+
+    // Consume inventory items (batch to avoid N+1 reloads)
+    const consumptions = selectedRecipe.ingredients
+      .filter(ing => ing.available)
+      .map(ing => {
+        const inventoryItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
+        return inventoryItem ? { id: inventoryItem.id, quantity: Math.min(ing.quantity, inventoryItem.quantity) } : null;
+      })
+      .filter((c): c is { id: string; quantity: number } => c !== null);
+    if (consumptions.length > 0) {
+      const { consumeItems } = useInventoryStore.getState();
+      await consumeItems(consumptions);
     }
 
     // Save recipe
@@ -170,7 +188,7 @@ export default function AICookScreen() {
     });
 
     // Navigate to recipe detail for step-by-step
-    router.replace(`/recipe-detail?id=${recipeId}&cooking=true`);
+    router.replace(`/recipe-detail?id=${recipeId}&cooking=true&costData=${encodeURIComponent(JSON.stringify(costData))}&totalCost=${totalRecipeCost}&cookType=${allowExtras ? 'ai_extras' : 'ai_inventory'}`);
   };
 
   const addUnavailableToShoppingList = () => {
@@ -354,6 +372,8 @@ export default function AICookScreen() {
               onPress={handleCookRecipe}
               style={styles.cookButton}
               icon="pot-steam"
+              disabled={isCooking}
+              loading={isCooking}
             >
               Start Cooking!
             </Button>

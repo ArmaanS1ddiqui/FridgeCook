@@ -44,11 +44,12 @@ export default function ScanScreen() {
 
     if (!result.canceled && result.assets[0]) {
       setImageUri(result.assets[0].uri);
-      await processImage(result.assets[0].uri);
+      const mimeType = result.assets[0].mimeType || 'image/jpeg';
+      await processImage(result.assets[0].uri, mimeType);
     }
   };
 
-  const processImage = async (uri: string) => {
+  const processImage = async (uri: string, mimeType: string = 'image/jpeg') => {
     setIsProcessing(true);
     try {
       const ready = await preflightCheck();
@@ -57,7 +58,7 @@ export default function ScanScreen() {
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      const items = await parseGroceryReceipt(base64);
+      const items = await parseGroceryReceipt(base64, mimeType);
       setScannedItems(items.map(i => ({ ...i, selected: true })));
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to process receipt. Make sure your Gemini API key is set in Profile.');
@@ -90,7 +91,7 @@ export default function ScanScreen() {
       quantity: item.quantity,
       unit: item.unit,
       category: item.category,
-      price_per_unit: item.quantity > 0 ? item.price / item.quantity : item.price,
+      price_per_unit: item.quantity > 0 ? item.price / item.quantity : 0,
       total_price: item.price,
       expiry_date: null,
       notes: 'Added via receipt scan',

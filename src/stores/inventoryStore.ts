@@ -49,7 +49,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     const db = await getDatabase();
     const now = new Date().toISOString();
     const id = Crypto.randomUUID();
-    const totalPrice = item.price_per_unit * item.quantity;
+    const totalPrice = item.total_price ?? (item.price_per_unit * item.quantity);
     await db.runAsync(
       `INSERT INTO inventory_items (id, name, quantity, unit, category, price_per_unit, total_price, expiry_date, added_date, updated_date, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -65,7 +65,9 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     if (!item) return;
 
     const updated = { ...item, ...updates, updated_date: now };
-    if (updates.quantity !== undefined || updates.price_per_unit !== undefined) {
+    if (updates.total_price !== undefined) {
+      updated.total_price = updates.total_price;
+    } else if (updates.quantity !== undefined || updates.price_per_unit !== undefined) {
       updated.total_price = (updates.price_per_unit ?? item.price_per_unit) * (updates.quantity ?? item.quantity);
     }
 
@@ -89,11 +91,20 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
 
     // Convert all to the same unit (use first item's unit as base)
     const baseUnit = items[0].unit;
+    const weightUnits = ['g', 'kg', 'mg', 'oz', 'lb', 'lbs'];
+    const volumeUnits = ['ml', 'l', 'L', 'cup', 'tbsp', 'tsp', 'fl_oz'];
+    const getUnitType = (u: string) => {
+      if (weightUnits.includes(u)) return 'weight';
+      if (volumeUnits.includes(u)) return 'volume';
+      return u;
+    };
+    const baseType = getUnitType(baseUnit);
+    const incompatible = items.some(i => getUnitType(i.unit) !== baseType);
     let totalQuantity = 0;
     let totalPrice = 0;
 
     for (const item of items) {
-      const converted = convertUnit(item.quantity, item.unit, baseUnit);
+      const converted = incompatible ? item.quantity : convertUnit(item.quantity, item.unit, baseUnit);
       totalQuantity += converted;
       totalPrice += item.total_price;
     }
@@ -109,7 +120,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     await db.runAsync(
       `INSERT INTO inventory_items (id, name, quantity, unit, category, price_per_unit, total_price, expiry_date, added_date, updated_date, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, newName, totalQuantity, baseUnit, items[0].category, pricePerUnit, totalPrice, earliestExpiry, now, now, `Merged from: ${items.map(i => `${i.name} (${i.quantity}${i.unit})`).join(', ')}`]
+      [id, newName, totalQuantity, baseUnit, items[0].category, pricePerUnit, totalPrice, earliestExpiry, now, now, `${incompatible ? '\u26A0 Mixed units merged: ' : 'Merged from: '}${items.map(i => `${i.name} (${i.quantity}${i.unit})`).join(', ')}`]
     );
 
     // Delete old items
@@ -163,7 +174,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     const now = new Date().toISOString();
     for (const item of items) {
       const id = Crypto.randomUUID();
-      const totalPrice = item.price_per_unit * item.quantity;
+      const totalPrice = item.total_price ?? (item.price_per_unit * item.quantity);
       await db.runAsync(
         `INSERT INTO inventory_items (id, name, quantity, unit, category, price_per_unit, total_price, expiry_date, added_date, updated_date, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

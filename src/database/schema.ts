@@ -22,7 +22,7 @@ class WebDatabase implements Database {
   private async load() {
     if (this.loaded) return;
     const raw = await AsyncStorage.getItem('fridgeapp_db');
-    this.data = raw ? JSON.parse(raw) : {};
+    try { this.data = raw ? JSON.parse(raw) : {}; } catch { this.data = {}; }
     this.loaded = true;
   }
 
@@ -47,10 +47,26 @@ class WebDatabase implements Database {
 
   async getAllAsync<T>(sql: string, params?: any[]): Promise<T[]> {
     await this.load();
+    const sqlLower = sql.toLowerCase();
     const { table, where, orderBy } = this.parseSql(sql, params);
+
+    // Handle COUNT(*) queries
+    if (sqlLower.includes('count(*)')) {
+      const fromMatch = sqlLower.match(/from\s+(\w+)/);
+      const countTable = fromMatch ? fromMatch[1] : '';
+      let rows = [...(this.data[countTable] || [])];
+      if (where) rows = rows.filter(where);
+      return [{ count: rows.length }] as T[];
+    }
+
     let rows = [...(this.data[table] || [])];
     if (where) rows = rows.filter(where);
     if (orderBy) rows.sort(orderBy);
+
+    // Handle LIMIT
+    const limitMatch = sqlLower.match(/limit\s+(\d+)/);
+    if (limitMatch) rows = rows.slice(0, parseInt(limitMatch[1]));
+
     return rows as T[];
   }
 

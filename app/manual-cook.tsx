@@ -31,6 +31,7 @@ export default function ManualCookScreen() {
   const [ratingEffort, setRatingEffort] = useState(0);
   const [ratingAgain, setRatingAgain] = useState(0);
   const [ratingSpice, setRatingSpice] = useState(0);
+  const [isCooking, setIsCooking] = useState(false);
 
   useEffect(() => {
     loadItems();
@@ -47,7 +48,7 @@ export default function ManualCookScreen() {
 
   const updateQuantity = (itemId: string, quantity: number) => {
     setSelectedIngredients(prev => prev.map(s =>
-      s.item.id === itemId ? { ...s, quantityUsed: Math.max(0, Math.min(quantity, s.item.quantity)) } : s
+      s.item.id === itemId ? { ...s, quantityUsed: Math.max(0.01, Math.min(quantity, s.item.quantity)) } : s
     ));
   };
 
@@ -60,12 +61,20 @@ export default function ManualCookScreen() {
   }, 0);
 
   const handleCook = async () => {
+    if (isCooking) return;
     if (!dishName.trim()) {
       Alert.alert('Error', 'Please enter a dish name');
       return;
     }
     if (selectedIngredients.length === 0) {
       Alert.alert('Error', 'Please select at least one ingredient');
+      return;
+    }
+    setIsCooking(true);
+
+    if (ratingTaste === 0) {
+      Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
+      setIsCooking(false);
       return;
     }
 
@@ -278,7 +287,7 @@ export default function ManualCookScreen() {
 
             <View style={styles.navButtons}>
               <Button mode="outlined" onPress={() => setStep('details')}>Back</Button>
-              <Button mode="contained" onPress={handleCook}>
+              <Button mode="contained" onPress={handleCook} disabled={isCooking} loading={isCooking}>
                 Cook!
               </Button>
             </View>

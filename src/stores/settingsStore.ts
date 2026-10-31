@@ -123,7 +123,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         selectedModel: resolvedModel,
         currency: currency || '$',
         supermarket: supermarket || 'carrefour',
-        appliances: appliances ? JSON.parse(appliances) : ['stove', 'microwave'],
+        appliances: (() => { try { return appliances ? JSON.parse(appliances) : ['stove', 'microwave']; } catch { return ['stove', 'microwave']; } })(),
         isLoaded: true,
       });
     } catch {
