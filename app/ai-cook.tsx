@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, Alert, FlatList } from 'react-native';
 import { Text, Card, Button, Chip, ActivityIndicator, IconButton, Divider, useTheme, Portal, Modal, TextInput } from 'react-native-paper';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter, useFocusEffect } from 'expo-router';
 import { useInventoryStore } from '../src/stores/inventoryStore';
 import { useProfileStore } from '../src/stores/profileStore';
 import { useRecipeStore } from '../src/stores/recipeStore';
@@ -38,10 +38,10 @@ export default function AICookScreen() {
   const allowExtras = mode === 'extras';
   const title = allowExtras ? 'AI Cook + Extras' : 'AI Cook';
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadItems();
     loadProfile();
-  }, []);
+  }, []));
 
   const fetchSuggestions = async () => {
     const ready = await preflightCheck();

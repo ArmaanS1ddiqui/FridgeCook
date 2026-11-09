@@ -152,7 +152,7 @@ ${inventoryList}
 
 Difficulty Level: ${params.difficulty}/10
 Servings: ${params.servings || 2}
-${params.allowExtras ? 'You MAY suggest recipes that need a few additional ingredients not in inventory, but prefer recipes using mostly available ingredients.' : 'ONLY use ingredients from the available inventory. Do not suggest any recipe requiring ingredients not listed above.'}
+${params.allowExtras ? 'IMPORTANT: You MUST suggest recipes that require 1-4 ADDITIONAL ingredients NOT in the user\'s inventory. Every recipe MUST have at least one ingredient where "available" is false. The goal is to inspire the user to buy a few extra things to make something special. Do NOT suggest recipes that can be made entirely from existing inventory — that is the other mode.' : 'ONLY use ingredients from the available inventory. Do not suggest any recipe requiring ingredients not listed above.'}
 ${profileContext}
 ${appliancesContext}
 ${supermarketContext}
@@ -199,7 +199,16 @@ IMPORTANT:
   const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
   try {
-    return JSON.parse(cleaned);
+    const recipes = JSON.parse(cleaned);
+    // Validate extras mode: each recipe must have at least one unavailable ingredient
+    if (params.allowExtras && Array.isArray(recipes)) {
+      const filtered = recipes.filter((r: any) =>
+        r.ingredients?.some((i: any) => i.available === false)
+      );
+      if (filtered.length === 0) throw new Error('No recipes with extra ingredients found. Try adjusting difficulty or servings.');
+      return filtered;
+    }
+    return recipes;
   } catch {
     throw new Error('Failed to parse AI response. Please try again.');
   }
@@ -257,5 +266,109 @@ Rules:
     return JSON.parse(cleaned);
   } catch {
     throw new Error('Failed to parse receipt. Please try again or add items manually.');
+  }
+}
+
+export async function generateMonthlyShoppingList(params: {
+  cookingHistory: Array<{ dish_name: string; ingredients: string[]; frequency: number }>;
+  currentInventory: Array<{ name: string; quantity: number; unit: string; category: string }>;
+  tasteProfile?: {
+    cuisine_preferences: Record<string, number>;
+    protein_preferences: Record<string, number>;
+    spice_tolerance: number;
+    dietary_restrictions: string[];
+    allergies: string[];
+  };
+  budget: number;
+  currency: string;
+  supermarket?: string;
+  servingsPerDay?: number;
+}): Promise<Array<{
+  name: string;
+  quantity: number;
+  unit: string;
+  category: string;
+  estimated_price: number;
+  reason: string;
+}>> {
+  const ai = await getAI();
+  const modelId = await getSelectedModel();
+  const model = ai.getGenerativeModel({ model: modelId });
+
+  const historyContext = params.cookingHistory.length > 0
+    ? `Dishes the user regularly cooks (with frequency per month):\n${params.cookingHistory.map(h => `- ${h.dish_name} (${h.frequency}x/month): uses ${h.ingredients.join(', ')}`).join('\n')}`
+    : 'No cooking history yet — suggest a balanced starter grocery list.';
+
+  const inventoryContext = params.currentInventory.length > 0
+    ? `Currently in fridge (don't re-buy these unless running low):\n${params.currentInventory.map(i => `- ${i.name}: ${i.quantity} ${i.unit}`).join('\n')}`
+    : 'Fridge is empty.';
+
+  const profileContext = params.tasteProfile
+    ? `Taste preferences:
+- Preferred cuisines: ${JSON.stringify(params.tasteProfile.cuisine_preferences)}
+- Preferred proteins: ${JSON.stringify(params.tasteProfile.protein_preferences)}
+- Spice tolerance: ${params.tasteProfile.spice_tolerance}/10
+- Dietary restrictions: ${params.tasteProfile.dietary_restrictions.join(', ') || 'None'}
+- Allergies: ${params.tasteProfile.allergies.join(', ') || 'None'}`
+    : '';
+
+  const prompt = `You are a grocery shopping assistant. Generate a MONTHLY shopping list for a household.
+
+${historyContext}
+
+${inventoryContext}
+
+${profileContext}
+
+Budget: ${params.currency}${params.budget} per month
+Servings per day: ${params.servingsPerDay || 2}
+${params.supermarket ? `Supermarket: ${params.supermarket} (Dubai, UAE). Use prices typical for this store.` : ''}
+
+Generate a comprehensive monthly shopping list that includes:
+1. Ingredients needed to cook the user's regular dishes for the month
+2. Staple items (oil, salt, spices, rice, bread, etc.) that may run out
+3. 5-8 ready-to-eat SNACKS suited to the user's taste (chips, nuts, yogurt, fruits, cookies, etc.)
+4. Fresh produce that needs weekly restocking (estimate 4 weeks)
+
+Rules:
+- Stay within the budget of ${params.currency}${params.budget}
+- Don't include items already well-stocked in the fridge
+- Prices must be realistic for Dubai supermarkets in ${params.currency}
+- Include a "reason" for each item (e.g., "For your regular Chicken Biryani", "Weekly fresh produce", "Snack")
+- Categories: Protein, Dairy, Vegetable, Fruit, Grain, Spice, Beverage, Snack, Condiment, Frozen, Other
+- NEVER include items that conflict with the user's dietary restrictions or contain their allergens
+- "estimated_price" is the price PER UNIT (not total)
+
+Return ONLY valid JSON array (no markdown, no code blocks):
+[
+  {
+    "name": "Item Name",
+    "quantity": number,
+    "unit": "kg/g/L/ml/pcs/pack",
+    "category": "Category",
+    "estimated_price": price_per_unit_in_${params.currency},
+    "reason": "Why this item is needed"
+  }
+]
+
+The total cost (sum of estimated_price * quantity for each item) MUST NOT exceed ${params.currency}${params.budget}.`;
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+  try {
+    const items = JSON.parse(cleaned);
+    if (!Array.isArray(items)) throw new Error('Invalid response');
+    return items.map(item => ({
+      name: typeof item.name === 'string' ? item.name : 'Unknown',
+      quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
+      unit: typeof item.unit === 'string' ? item.unit : 'pcs',
+      category: typeof item.category === 'string' ? item.category : 'Other',
+      estimated_price: typeof item.estimated_price === 'number' ? item.estimated_price : 0,
+      reason: typeof item.reason === 'string' ? item.reason : '',
+    }));
+  } catch {
+    throw new Error('Failed to generate shopping list. Please try again.');
   }
 }

@@ -73,6 +73,21 @@ export default function CookScreen() {
           <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} />
         </Card.Content>
       </Card>
+
+      <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} onPress={() => router.push('/monthly-shopping')}>
+        <Card.Content style={styles.cardContent}>
+          <View style={[styles.iconCircle, { backgroundColor: theme.colors.primaryContainer }]}>
+            <MaterialCommunityIcons name="calendar-month" size={36} color={theme.colors.primary} />
+          </View>
+          <View style={styles.cardText}>
+            <Text variant="titleMedium" style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Monthly Shopping List</Text>
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 20 }}>
+              AI generates a monthly grocery list based on your cooking habits and budget
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} />
+        </Card.Content>
+      </Card>
     </ScrollView>
   );
 }
