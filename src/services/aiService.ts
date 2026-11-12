@@ -263,7 +263,15 @@ Rules:
   const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
   try {
-    return JSON.parse(cleaned);
+    const raw = JSON.parse(cleaned);
+    if (!Array.isArray(raw)) throw new Error('Invalid response');
+    return raw.map((item: any) => ({
+      name: typeof item.name === 'string' ? item.name.trim() : 'Unknown Item',
+      quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
+      unit: typeof item.unit === 'string' ? item.unit : 'pcs',
+      price: typeof item.price === 'number' && item.price >= 0 ? item.price : 0,
+      category: typeof item.category === 'string' ? item.category : 'Other',
+    }));
   } catch {
     throw new Error('Failed to parse receipt. Please try again or add items manually.');
   }

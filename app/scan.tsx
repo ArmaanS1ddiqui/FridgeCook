@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Image } from 'react-native';
 import { Button, Text, Card, TextInput, IconButton, Chip, ActivityIndicator, useTheme } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { parseGroceryReceipt } from '../src/services/aiService';
 import { useInventoryStore } from '../src/stores/inventoryStore';
 import { useRouter, Stack } from 'expo-router';
@@ -37,19 +37,41 @@ export default function ScanScreen() {
         Alert.alert('Permission needed', 'Camera permission is required to scan receipts');
         return;
       }
-      result = await ImagePicker.launchCameraAsync({ quality: 0.8, base64: false });
+      result = await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true });
     } else {
-      result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, base64: false });
+      result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
     }
 
     if (!result.canceled && result.assets[0]) {
-      setImageUri(result.assets[0].uri);
-      const mimeType = result.assets[0].mimeType || 'image/jpeg';
-      await processImage(result.assets[0].uri, mimeType);
+      const asset = result.assets[0];
+      setImageUri(asset.uri);
+      const mimeType = asset.mimeType || 'image/jpeg';
+      const base64 = asset.base64;
+      if (base64) {
+        await processImageFromBase64(base64, mimeType);
+      } else {
+        // Fallback: read from file
+        await processImageFromUri(asset.uri, mimeType);
+      }
     }
   };
 
-  const processImage = async (uri: string, mimeType: string = 'image/jpeg') => {
+  const processImageFromBase64 = async (base64: string, mimeType: string) => {
+    setIsProcessing(true);
+    try {
+      const ready = await preflightCheck();
+      if (!ready) { setIsProcessing(false); return; }
+
+      const items = await parseGroceryReceipt(base64, mimeType);
+      setScannedItems(items.map(i => ({ ...i, selected: true })));
+    } catch (error: any) {
+      Alert.alert('Scan Error', error.message || 'Failed to process receipt. Check your API key in Settings.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const processImageFromUri = async (uri: string, mimeType: string) => {
     setIsProcessing(true);
     try {
       const ready = await preflightCheck();
@@ -61,7 +83,7 @@ export default function ScanScreen() {
       const items = await parseGroceryReceipt(base64, mimeType);
       setScannedItems(items.map(i => ({ ...i, selected: true })));
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to process receipt. Make sure your Gemini API key is set in Profile.');
+      Alert.alert('Scan Error', error.message || 'Failed to process receipt. Check your API key in Settings.');
     } finally {
       setIsProcessing(false);
     }
