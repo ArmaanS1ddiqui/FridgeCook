@@ -141,7 +141,7 @@ export default function MonthlyShoppingScreen() {
       unit: i.unit,
       category: i.category,
       estimated_price: i.estimated_price,
-    })));
+    })), undefined, 'monthly');
 
     Alert.alert('Added!', `${selected.length} items added to your shopping list`, [
       { text: 'View Shopping List', onPress: () => router.replace('/shopping-list') },
@@ -154,7 +154,7 @@ export default function MonthlyShoppingScreen() {
       <Stack.Screen
         options={{
           headerShown: true,
-          title: 'Monthly Shopping List',
+          title: 'Monthly Shop',
           headerStyle: { backgroundColor: theme.colors.surface },
           headerTintColor: theme.colors.onSurface,
           headerShadowVisible: false,
@@ -166,7 +166,7 @@ export default function MonthlyShoppingScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Budget Input */}
-        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+        <Card mode="contained" style={[styles.card, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
             <Text variant="titleMedium" style={{ fontWeight: '700', color: theme.colors.onSurface, marginBottom: 8 }}>
               Monthly Budget
@@ -177,8 +177,8 @@ export default function MonthlyShoppingScreen() {
             <TextInput
               label={`Budget (${currency})`}
               value={budget}
-              onChangeText={setBudget}
-              keyboardType="numeric"
+              onChangeText={v => setBudget(v.replace(',', '.').replace(/[^\d.]/g, ''))}
+              keyboardType="decimal-pad"
               mode="outlined"
               style={{ marginBottom: 8 }}
               placeholder="e.g. 1500"
@@ -215,6 +215,7 @@ export default function MonthlyShoppingScreen() {
 
             {generatedList.map((item, index) => (
               <Card
+                mode="contained"
                 key={index}
                 style={[styles.itemCard, { backgroundColor: theme.colors.surface }, !item.selected && { opacity: 0.5 }]}
                 onPress={() => toggleItem(index)}

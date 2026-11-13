@@ -1,7 +1,18 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, Part } from '@google/generative-ai';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  extractJson, sanitizeReceipt, sanitizeRecipes, sanitizeMonthlyList,
+  friendlyAIError, isModelUnavailable, isTransient,
+  ParsedReceipt, AIRecipeSuggestion, MonthlyListItem,
+} from './aiParsing';
+import { StockItem } from '../utils/matching';
+
+export type { AIRecipeSuggestion, ParsedReceipt, ReceiptItem, MonthlyListItem } from './aiParsing';
 
 const API_KEY_STORAGE = 'gemini_api_key';
+const DEFAULT_MODEL = 'gemini-3.8-flash';
+// Tried in order when the selected model is rejected by the API.
+const FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview'];
 
 let genAI: GoogleGenerativeAI | null = null;
 
@@ -31,7 +42,71 @@ async function getAI(): Promise<GoogleGenerativeAI> {
 
 async function getSelectedModel(): Promise<string> {
   const model = await AsyncStorage.getItem('selected_model');
-  return model || 'gemini-3.8-flash';
+  return model || DEFAULT_MODEL;
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+interface GenerateOptions {
+  json?: boolean;
+  temperature?: number;
+  timeoutMs?: number;
+}
+
+/**
+ * One place for every Gemini call: JSON mode, a timeout, one retry when the
+ * service is busy, and fallback to another model when the chosen one is gone.
+ */
+async function generate(parts: Array<string | Part>, options: GenerateOptions = {}): Promise<{ text: string; model: string }> {
+  const ai = await getAI();
+  const selected = await getSelectedModel();
+  const candidates = [selected, ...FALLBACK_MODELS.filter(m => m !== selected)];
+
+  let lastError: unknown = null;
+  for (const modelId of candidates) {
+    const model = ai.getGenerativeModel(
+      {
+        model: modelId,
+        generationConfig: {
+          ...(options.json ? { responseMimeType: 'application/json' } : {}),
+          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        },
+      },
+      { timeout: options.timeoutMs ?? 90000 },
+    );
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await model.generateContent(parts);
+        const text = result.response.text();
+        if (!text || !text.trim()) throw new Error('Empty response from the AI');
+        return { text, model: modelId };
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0 && isTransient(error)) {
+          await sleep(1500);
+          continue;
+        }
+        break;
+      }
+    }
+    if (!isModelUnavailable(lastError)) break;
+  }
+  throw lastError;
+}
+
+/** Ask for JSON and parse it; if the reply is unreadable, ask once more. */
+async function generateJson<T>(parts: Array<string | Part>, parse: (raw: unknown) => T, options: GenerateOptions = {}): Promise<T> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { text } = await generate(parts, { ...options, json: true });
+    try {
+      return parse(extractJson(text));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 // Test API connection and return model info
@@ -40,57 +115,26 @@ export async function testApiConnection(): Promise<{
   model: string;
   message: string;
 }> {
+  const selected = await getSelectedModel();
   try {
-    const ai = await getAI();
-    const modelId = await getSelectedModel();
-    const model = ai.getGenerativeModel({ model: modelId });
-    const result = await model.generateContent('Reply with exactly: "Connection successful" and nothing else.');
-    const text = result.response.text();
+    const { text, model } = await generate(['Reply with exactly: "Connection successful" and nothing else.'], { timeoutMs: 30000 });
+    const note = model !== selected ? ` (${selected} was unavailable, so ${model} answered instead)` : '';
     return {
       success: true,
-      model: modelId,
-      message: `Connected to ${modelId}. Response: "${text.trim()}"`,
+      model,
+      message: `Connected to ${model}${note}. Response: "${text.trim()}"`,
     };
   } catch (error: any) {
     return {
       success: false,
-      model: await getSelectedModel(),
-      message: error.message || 'Connection failed',
+      model: selected,
+      message: friendlyAIError(error, 'connect'),
     };
   }
 }
 
-export interface AIRecipeSuggestion {
-  name: string;
-  description: string;
-  difficulty: number;
-  prep_time_minutes: number;
-  cook_time_minutes: number;
-  servings: number;
-  cuisine: string;
-  ingredients: Array<{
-    name: string;
-    quantity: number;
-    unit: string;
-    available: boolean;
-    inInventory: number;
-  }>;
-  steps: Array<{
-    step: number;
-    instruction: string;
-    duration_minutes?: number;
-    needs_timer?: boolean;
-  }>;
-  estimated_cost: number;
-  calories: number;
-  protein_grams: number;
-  calories_percent?: number; // % of daily needs
-  protein_percent?: number; // % of daily needs
-  match_score: number;
-}
-
 export async function getRecipeSuggestions(params: {
-  inventory: Array<{ name: string; quantity: number; unit: string; category: string }>;
+  inventory: Array<StockItem & { category: string; daysLeft?: number | null; frozen?: boolean }>;
   difficulty: number;
   allowExtras: boolean;
   tasteProfile?: {
@@ -108,14 +152,21 @@ export async function getRecipeSuggestions(params: {
   dailyCalories?: number;
   dailyProtein?: number;
   goalType?: string;
+  /** Item names the user specifically wants used up. */
+  focusItems?: string[];
 }): Promise<AIRecipeSuggestion[]> {
-  const ai = await getAI();
-  const modelId = await getSelectedModel();
-  const model = ai.getGenerativeModel({ model: modelId });
-
   const inventoryList = params.inventory
-    .map(i => `- ${i.name}: ${i.quantity} ${i.unit} (${i.category})`)
+    .map(i => {
+      const expiry = i.daysLeft === null || i.daysLeft === undefined ? ''
+        : i.daysLeft < 0 ? ' — PAST its expiry date, do not use'
+        : i.daysLeft === 0 ? ' — expires TODAY'
+        : i.daysLeft <= 3 ? ` — expires in ${i.daysLeft} day${i.daysLeft === 1 ? '' : 's'}`
+        : '';
+      return `- ${i.name}: ${i.quantity} ${i.unit} (${i.category}${i.frozen ? ', FROZEN' : ''})${expiry}`;
+    })
     .join('\n');
+
+  const hasExpiring = params.inventory.some(i => i.daysLeft !== null && i.daysLeft !== undefined && i.daysLeft >= 0 && i.daysLeft <= 3);
 
   const profileContext = params.tasteProfile
     ? `
@@ -126,6 +177,7 @@ User Taste Profile:
 - Complexity preference: ${params.tasteProfile.complexity_preference}/10
 - Dietary restrictions: ${params.tasteProfile.dietary_restrictions.join(', ') || 'None'}
 - Allergies: ${params.tasteProfile.allergies.join(', ') || 'None'}
+NEVER include anything that conflicts with the dietary restrictions or contains the allergens.
 `
     : '';
 
@@ -145,6 +197,12 @@ ${params.goalType === 'high_protein' ? 'User prefers HIGH PROTEIN recipes. Prior
 For each recipe, calculate approximate calories and protein, and what percentage of daily needs this dish fulfills.`
     : '';
 
+  const focusContext = params.focusItems && params.focusItems.length > 0
+    ? `\nUSE-IT-UP MODE: The user wants to use up these items before they go bad: ${params.focusItems.join(', ')}. Every recipe MUST use at least one of them, and the best matches should use several.`
+    : hasExpiring
+      ? '\nSome items are marked as expiring soon. Prefer recipes that use those up, and rank them higher.'
+      : '';
+
   const prompt = `You are a chef AI. Suggest 3-5 recipes based on the available ingredients.
 
 Available Ingredients:
@@ -152,13 +210,14 @@ ${inventoryList}
 
 Difficulty Level: ${params.difficulty}/10
 Servings: ${params.servings || 2}
-${params.allowExtras ? 'IMPORTANT: You MUST suggest recipes that require 1-4 ADDITIONAL ingredients NOT in the user\'s inventory. Every recipe MUST have at least one ingredient where "available" is false. The goal is to inspire the user to buy a few extra things to make something special. Do NOT suggest recipes that can be made entirely from existing inventory — that is the other mode.' : 'ONLY use ingredients from the available inventory. Do not suggest any recipe requiring ingredients not listed above.'}
+${params.allowExtras ? 'IMPORTANT: You MUST suggest recipes that require 1-4 ADDITIONAL ingredients NOT in the user\'s inventory. Every recipe MUST have at least one ingredient where "available" is false. The goal is to inspire the user to buy a few extra things to make something special. Do NOT suggest recipes that can be made entirely from existing inventory — that is the other mode.' : 'ONLY use ingredients from the available inventory. Do not suggest any recipe requiring ingredients not listed above. Never use more of an ingredient than the quantity listed.'}
+${focusContext}
 ${profileContext}
 ${appliancesContext}
 ${supermarketContext}
 ${nutritionContext}
 
-Return ONLY valid JSON array with this structure (no markdown, no code blocks):
+Return ONLY a valid JSON array with this structure:
 [
   {
     "name": "Recipe Name",
@@ -169,7 +228,7 @@ Return ONLY valid JSON array with this structure (no markdown, no code blocks):
     "servings": number,
     "cuisine": "Cuisine Type",
     "ingredients": [
-      { "name": "Ingredient", "quantity": number, "unit": "g/ml/pcs/etc", "available": true/false, "inInventory": number }
+      { "name": "Ingredient", "quantity": number, "unit": "g/ml/pcs/etc", "available": true/false }
     ],
     "steps": [
       { "step": 1, "instruction": "Step description", "duration_minutes": number, "needs_timer": true/false }
@@ -184,96 +243,84 @@ Return ONLY valid JSON array with this structure (no markdown, no code blocks):
 ]
 
 IMPORTANT:
-- All costs must be in ${currencySymbol} (the user's selected currency)
-- "estimated_cost" must be a number in ${currencySymbol}
+- For every ingredient that comes from the inventory, copy its "name" EXACTLY as written in the list above, and give the quantity in the SAME unit the inventory uses for it (if the inventory says "Chicken Breast: 1 kg", write {"name": "Chicken Breast", "quantity": 0.4, "unit": "kg"}).
+- Quantities are for the whole recipe (all ${params.servings || 2} servings).
+- All costs must be in ${currencySymbol} (the user's selected currency). "estimated_cost" must be a plain number.
 - "calories" is the total calories for the entire recipe (all servings)
 - "protein_grams" is the total protein in grams for the entire recipe
 - "calories_percent" is what percentage of the user's daily ${params.dailyCalories || 2000} calorie need this recipe fulfills (per serving)
 - "protein_percent" is what percentage of the user's daily ${params.dailyProtein || 50}g protein need this recipe fulfills (per serving)
-- For each ingredient, set "available" to true if it's in the inventory, false if it needs to be purchased. Set "inInventory" to the quantity available (0 if not available).
+- Write the steps for someone who has never made this dish. Each step must be specific enough to follow without guessing:
+  - Name the ingredients used in that step and how much of each ("add the 300 g diced chicken", not "add the chicken").
+  - Say what state each ingredient is in when it goes in: raw or already cooked, rinsed, soaked, drained, peeled, at room temperature. Never write "add the rice" without saying whether it is uncooked or cooked.
+  - Assume every inventory item is RAW / uncooked unless its name says otherwise ("Cooked Rice", "Leftover ..."). If a recipe needs something cooked first (rice, pasta, lentils, potatoes), include that as its own step with the amount of water and the time.
+  - Give the heat level (low / medium / high or an oven temperature in °C), the time, and how to tell it is done ("until the rice is tender and the water is absorbed").
+  - Include the liquid needed (water, stock) with an amount, and put all chopping and prep in the early steps.
+  - One action per step. Do not write vague steps like "cook everything together" or "simmer with rice".
+- Items marked FROZEN are in the freezer: the first step that uses one must say how to thaw it (or that it can be cooked from frozen), and the thawing time must be counted in prep_time_minutes.
+- Water, salt and black pepper may be used without being in the inventory; list them as ingredients only if a specific amount matters.
 - For each step, set "needs_timer" to true if the step involves waiting (boiling, baking, marinating, resting, simmering, etc.) and false for active work (chopping, mixing, plating).
 - Sort recipes by match_score descending (best matches first).`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
   try {
-    const recipes = JSON.parse(cleaned);
-    // Validate extras mode: each recipe must have at least one unavailable ingredient
-    if (params.allowExtras && Array.isArray(recipes)) {
-      const filtered = recipes.filter((r: any) =>
-        r.ingredients?.some((i: any) => i.available === false)
-      );
-      if (filtered.length === 0) throw new Error('No recipes with extra ingredients found. Try adjusting difficulty or servings.');
-      return filtered;
+    const recipes = await generateJson(
+      [prompt],
+      raw => sanitizeRecipes(raw, params.inventory, params.servings || 2),
+    );
+    if (recipes.length === 0) throw new Error('The AI returned no usable recipes. Please try again.');
+    if (params.allowExtras) {
+      const withExtras = recipes.filter(r => r.ingredients.some(i => !i.available));
+      // If the model ignored the "extras" instruction, showing its recipes still beats an error.
+      return withExtras.length > 0 ? withExtras : recipes;
     }
     return recipes;
-  } catch {
-    throw new Error('Failed to parse AI response. Please try again.');
+  } catch (error) {
+    throw new Error(friendlyAIError(error, 'get recipes'));
   }
 }
 
-export async function parseGroceryReceipt(base64Image: string, mimeType: string = 'image/jpeg'): Promise<Array<{
-  name: string;
-  quantity: number;
-  unit: string;
-  price: number;
-  category: string;
-}>> {
-  const ai = await getAI();
-  const modelId = await getSelectedModel();
-  const model = ai.getGenerativeModel({ model: modelId });
+export async function parseGroceryReceipt(base64Image: string, mimeType: string = 'image/jpeg'): Promise<ParsedReceipt> {
+  const prompt = `You are reading a photo of a grocery receipt (likely from a UAE supermarket such as Carrefour, Lulu, Spinneys or Union Coop; lines may be in English, Arabic, or both).
 
-  const prompt = `Analyze this grocery receipt/bill image. Extract all food items with their quantities and prices.
-
-Return ONLY valid JSON array (no markdown, no code blocks):
-[
-  {
-    "name": "Item Name (clean, readable name)",
-    "quantity": number,
-    "unit": "kg/g/L/ml/pcs",
-    "price": total_price_number,
-    "category": "Protein/Dairy/Vegetable/Fruit/Grain/Spice/Beverage/Snack/Condiment/Frozen/Other"
-  }
-]
+Extract every FOOD or DRINK line item and return ONLY this JSON object:
+{
+  "store": "Store name or null",
+  "date": "YYYY-MM-DD or null",
+  "total": grand_total_number_or_null,
+  "items": [
+    {
+      "name": "Clean readable English name",
+      "quantity": number,
+      "unit": "kg | g | L | ml | pcs",
+      "price": line_total_number,
+      "category": "Protein | Dairy | Vegetable | Fruit | Grain | Spice | Beverage | Snack | Condiment | Frozen | Other",
+      "shelf_life_days": number_or_null
+    }
+  ]
+}
 
 Rules:
-- Convert abbreviated names to full readable names
-- If quantity isn't clear, default to 1 pcs
-- Price should be the total price for that line item
-- Price must be a plain number (no currency symbols), use period as decimal separator
-- SKIP subtotals, totals, tax, VAT, discounts, bag fees, and loyalty points
-- For weighted items, calculate total line price
-- If receipt is non-English, translate item names to English
-- Categorize each item appropriately
-- Skip non-food items`;
-
-  const result = await model.generateContent([
-    prompt,
-    {
-      inlineData: {
-        mimeType: mimeType,
-        data: base64Image,
-      },
-    },
-  ]);
-
-  const text = result.response.text();
-  const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+- Read the receipt top to bottom and include EVERY food/drink item. Do not stop early and do not invent items that are not printed.
+- "name": expand abbreviations into a normal product name ("CHKN BRST BNLS" -> "Boneless Chicken Breast", "AL AIN MLK FF 1L" -> "Al Ain Full Fat Milk"). Translate Arabic to English. Keep the brand if printed. Do not include the size in the name.
+- "quantity" and "unit":
+  - Loose weighed items (e.g. "0.456 kg x 12.50"): quantity is the weight, unit is "kg".
+  - Packaged items bought N times (e.g. "2 x 3.50" or "QTY 2"): quantity is N, unit is "pcs".
+  - A single packaged item: quantity 1, unit "pcs" — even if the pack size (500g, 1L) is printed in its name.
+  - If unclear, use quantity 1 and unit "pcs".
+- "price": the TOTAL paid for that line after any discount printed for it, as a plain number with a period as the decimal separator and no currency symbol. If a line shows both a unit price and a line total, use the line total.
+- "shelf_life_days": realistic days the item stays good after purchase when stored properly (fresh chicken 2, fresh fish 2, minced meat 2, milk 7, yogurt 14, eggs 28, leafy greens 5, tomatoes 7, bananas 5, apples 21, bread 5, hard cheese 30, frozen food 90). Use null for shelf-stable items (rice, pasta, canned food, spices, oil, sauces, snacks, soft drinks, water).
+- SKIP: subtotal, total, VAT/tax lines, change, payment/card lines, loyalty points, bag charges, delivery fees, and all non-food items (cleaning, toiletries, etc.).
+- "total": the grand total printed on the receipt (including VAT), or null if not visible.
+- If the image is not a receipt or no items are readable, return {"store": null, "date": null, "total": null, "items": []}.`;
 
   try {
-    const raw = JSON.parse(cleaned);
-    if (!Array.isArray(raw)) throw new Error('Invalid response');
-    return raw.map((item: any) => ({
-      name: typeof item.name === 'string' ? item.name.trim() : 'Unknown Item',
-      quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
-      unit: typeof item.unit === 'string' ? item.unit : 'pcs',
-      price: typeof item.price === 'number' && item.price >= 0 ? item.price : 0,
-      category: typeof item.category === 'string' ? item.category : 'Other',
-    }));
-  } catch {
-    throw new Error('Failed to parse receipt. Please try again or add items manually.');
+    return await generateJson(
+      [prompt, { inlineData: { mimeType, data: base64Image } }],
+      sanitizeReceipt,
+      { temperature: 0.1, timeoutMs: 120000 },
+    );
+  } catch (error) {
+    throw new Error(friendlyAIError(error, 'read the receipt'));
   }
 }
 
@@ -291,18 +338,7 @@ export async function generateMonthlyShoppingList(params: {
   currency: string;
   supermarket?: string;
   servingsPerDay?: number;
-}): Promise<Array<{
-  name: string;
-  quantity: number;
-  unit: string;
-  category: string;
-  estimated_price: number;
-  reason: string;
-}>> {
-  const ai = await getAI();
-  const modelId = await getSelectedModel();
-  const model = ai.getGenerativeModel({ model: modelId });
-
+}): Promise<MonthlyListItem[]> {
   const historyContext = params.cookingHistory.length > 0
     ? `Dishes the user regularly cooks (with frequency per month):\n${params.cookingHistory.map(h => `- ${h.dish_name} (${h.frequency}x/month): uses ${h.ingredients.join(', ')}`).join('\n')}`
     : 'No cooking history yet — suggest a balanced starter grocery list.';
@@ -347,12 +383,12 @@ Rules:
 - NEVER include items that conflict with the user's dietary restrictions or contain their allergens
 - "estimated_price" is the price PER UNIT (not total)
 
-Return ONLY valid JSON array (no markdown, no code blocks):
+Return ONLY a valid JSON array:
 [
   {
     "name": "Item Name",
     "quantity": number,
-    "unit": "kg/g/L/ml/pcs/pack",
+    "unit": "kg/g/L/ml/pcs",
     "category": "Category",
     "estimated_price": price_per_unit_in_${params.currency},
     "reason": "Why this item is needed"
@@ -361,22 +397,11 @@ Return ONLY valid JSON array (no markdown, no code blocks):
 
 The total cost (sum of estimated_price * quantity for each item) MUST NOT exceed ${params.currency}${params.budget}.`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
   try {
-    const items = JSON.parse(cleaned);
-    if (!Array.isArray(items)) throw new Error('Invalid response');
-    return items.map(item => ({
-      name: typeof item.name === 'string' ? item.name : 'Unknown',
-      quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
-      unit: typeof item.unit === 'string' ? item.unit : 'pcs',
-      category: typeof item.category === 'string' ? item.category : 'Other',
-      estimated_price: typeof item.estimated_price === 'number' ? item.estimated_price : 0,
-      reason: typeof item.reason === 'string' ? item.reason : '',
-    }));
-  } catch {
-    throw new Error('Failed to generate shopping list. Please try again.');
+    const items = await generateJson([prompt], sanitizeMonthlyList);
+    if (items.length === 0) throw new Error('The AI returned an empty list. Please try again.');
+    return items;
+  } catch (error) {
+    throw new Error(friendlyAIError(error, 'generate the list'));
   }
 }

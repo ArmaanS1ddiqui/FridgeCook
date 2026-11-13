@@ -11,11 +11,15 @@ import { getRecipeSuggestions, AIRecipeSuggestion } from '../src/services/aiServ
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { preflightCheck } from '../src/hooks/usePreflightCheck';
 import { useSettingsStore, KITCHEN_APPLIANCES, DUBAI_SUPERMARKETS, calculateDailyNeeds } from '../src/stores/settingsStore';
+import { daysUntil, expiryStatus } from '../src/utils/expiry';
+import { planConsumption } from '../src/utils/matching';
+import { formatAmount, formatQty } from '../src/utils/units';
+import { ChoiceChips } from '../src/components/ui';
 
 export default function AICookScreen() {
   const theme = useTheme();
-  const { mode } = useLocalSearchParams<{ mode: 'inventory' | 'extras' }>();
-  const { items: inventory, loadItems, addItem } = useInventoryStore();
+  const { mode, useUp } = useLocalSearchParams<{ mode: 'inventory' | 'extras'; useUp?: string }>();
+  const { items: inventory, loadItems, addBulkItems } = useInventoryStore();
   const { profile, loadProfile } = useProfileStore();
   const { saveRecipe } = useRecipeStore();
   const { addFromRecipe } = useShoppingStore();
@@ -36,7 +40,11 @@ export default function AICookScreen() {
   const [isCooking, setIsCooking] = useState(false);
 
   const allowExtras = mode === 'extras';
-  const title = allowExtras ? 'AI Cook + Extras' : 'AI Cook';
+  const useUpMode = useUp === '1';
+  const title = useUpMode ? 'Use It Up' : allowExtras ? 'AI Cook + Extras' : 'AI Cook';
+  // Never cook with food that is past its date.
+  const usable = inventory.filter(i => expiryStatus(i.expiry_date) !== 'expired');
+  const expiringSoon = usable.filter(i => expiryStatus(i.expiry_date) === 'soon');
 
   useFocusEffect(useCallback(() => {
     loadItems();
@@ -47,8 +55,8 @@ export default function AICookScreen() {
     const ready = await preflightCheck();
     if (!ready) return;
 
-    if (inventory.length === 0) {
-      Alert.alert('Empty Fridge', 'Add some items to your fridge first!');
+    if (usable.length === 0) {
+      Alert.alert('Nothing to cook with', inventory.length === 0 ? 'Add some items to your fridge first.' : 'Everything in your fridge is past its expiry date.');
       return;
     }
 
@@ -60,12 +68,17 @@ export default function AICookScreen() {
       const dailyNeeds = healthProfile ? calculateDailyNeeds(healthProfile) : null;
 
       const results = await getRecipeSuggestions({
-        inventory: inventory.map(i => ({
+        inventory: usable.map(i => ({
+          id: i.id,
           name: i.name,
           quantity: i.quantity,
           unit: i.unit,
           category: i.category,
+          price_per_unit: i.price_per_unit,
+          daysLeft: daysUntil(i.expiry_date),
+          frozen: !!i.is_frozen,
         })),
+        focusItems: useUpMode ? expiringSoon.map(i => i.name) : undefined,
         difficulty,
         allowExtras,
         tasteProfile: profile ? {
@@ -86,7 +99,7 @@ export default function AICookScreen() {
       });
       setSuggestions(results);
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to get suggestions. Check your API key in Profile.');
+      Alert.alert('Error', error.message || 'Failed to get suggestions. Check your API key in Settings.');
     } finally {
       setIsLoading(false);
     }
@@ -116,68 +129,45 @@ export default function AICookScreen() {
       return;
     }
 
-    const needed = buyingIngredient.quantity;
-    const inStock = buyingIngredient.inInventory;
-    const toBuy = Math.max(0, needed - inStock);
-    const usedForRecipe = Math.min(boughtQty, toBuy);
-    const excess = boughtQty - usedForRecipe;
-
-    if (excess > 0) {
-      await addItem({
-        name: buyingIngredient.name,
-        quantity: excess,
-        unit: buyingIngredient.unit,
-        category: 'Other',
-        price_per_unit: 0,
-        total_price: 0,
-        expiry_date: null,
-        notes: 'Excess from recipe purchase',
-      });
-    }
+    // Put everything that was bought into the fridge; cooking then deducts what
+    // the recipe uses, so leftovers stay behind and nothing is counted twice.
+    await addBulkItems([{
+      name: buyingIngredient.name,
+      quantity: boughtQty,
+      unit: buyingIngredient.unit,
+      category: 'Other',
+      price_per_unit: 0,
+      total_price: 0,
+      expiry_date: null,
+      notes: 'Bought for a recipe',
+    }]);
 
     setBoughtItems(prev => ({ ...prev, [buyingIngredient.name]: true }));
     setBuyModalVisible(false);
     setBuyingIngredient(null);
   };
 
-  const handleCookRecipe = async () => {
+  const handleCookRecipe = async (skipMissingCheck = false) => {
     if (isCooking) return;
     if (!selectedRecipe) return;
 
-    // Check all unavailable items are bought
+    // Warn about items that are neither in the fridge nor marked as bought,
+    // but let the user carry on (they may have it, or be happy to skip it).
     const unbought = selectedRecipe.ingredients.filter(i => !i.available && !boughtItems[i.name]);
-    if (unbought.length > 0) {
-      Alert.alert('Missing Items', `You still need: ${unbought.map(i => i.name).join(', ')}`);
+    if (unbought.length > 0 && !skipMissingCheck) {
+      Alert.alert(
+        'Missing ingredients',
+        `You don't have enough of: ${unbought.map(i => i.name).join(', ')}.`,
+        [
+          { text: 'Go back', style: 'cancel' },
+          { text: 'Cook anyway', onPress: () => handleCookRecipe(true) },
+        ],
+      );
       return;
     }
     setIsCooking(true);
     try {
-      // Calculate costs BEFORE consuming (items may be deleted after consumption)
-      const costData: Record<string, number> = {};
-      let totalRecipeCost = 0;
-      for (const ing of selectedRecipe.ingredients) {
-        if (ing.available) {
-          const invItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
-          const cost = invItem ? invItem.price_per_unit * ing.quantity : 0;
-          costData[ing.name] = cost;
-          totalRecipeCost += cost;
-        }
-      }
-
-      // Consume inventory items (batch to avoid N+1 reloads)
-      const consumptions = selectedRecipe.ingredients
-        .filter(ing => ing.available)
-        .map(ing => {
-          const inventoryItem = inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
-          return inventoryItem ? { id: inventoryItem.id, quantity: Math.min(ing.quantity, inventoryItem.quantity) } : null;
-        })
-        .filter((c): c is { id: string; quantity: number } => c !== null);
-      if (consumptions.length > 0) {
-        const { consumeItems } = useInventoryStore.getState();
-        await consumeItems(consumptions);
-      }
-
-      // Save recipe
+      // Save the recipe first: if this fails, nothing has been taken from the fridge yet.
       const recipeId = await saveRecipe({
         name: selectedRecipe.name,
         description: selectedRecipe.description,
@@ -193,8 +183,35 @@ export default function AICookScreen() {
         is_favorite: 0,
       });
 
+      // Work out what comes out of the fridge, converting each recipe amount
+      // into the unit the item is stored in (200 g of a 1 kg pack = 0.2 kg).
+      const fresh = useInventoryStore.getState().items.filter(i => expiryStatus(i.expiry_date) !== 'expired');
+      const plan = planConsumption(selectedRecipe.ingredients, fresh);
+      const costData: Record<string, number> = {};
+      let totalRecipeCost = 0;
+      for (const line of plan) {
+        costData[line.ingredient.name] = line.cost;
+        totalRecipeCost += line.cost;
+      }
+
+      const consumptions = plan
+        .filter(line => line.item && line.deduct > 0)
+        .map(line => ({ id: line.item!.id, quantity: line.deduct }));
+      if (consumptions.length > 0) {
+        const { consumeItems } = useInventoryStore.getState();
+        await consumeItems(consumptions);
+      }
+
+      const notDeducted = plan.filter(line => line.status === 'unit_mismatch');
+      if (notDeducted.length > 0) {
+        Alert.alert(
+          'Check these amounts',
+          `Couldn't work out how much to deduct for: ${notDeducted.map(l => `${l.ingredient.name} (recipe uses ${formatAmount(l.ingredient.quantity, l.ingredient.unit)}, fridge has ${formatAmount(l.item!.quantity, l.item!.unit)})`).join('; ')}. Update them in your fridge after cooking.`,
+        );
+      }
+
       // Navigate to recipe detail for step-by-step
-      router.replace(`/recipe-detail?id=${recipeId}&cooking=true&costData=${encodeURIComponent(JSON.stringify(costData))}&totalCost=${totalRecipeCost}&cookType=${allowExtras ? 'ai_extras' : 'ai_inventory'}`);
+      router.replace(`/recipe-detail?id=${recipeId}&cooking=true&costData=${encodeURIComponent(JSON.stringify(costData))}&totalCost=${Math.round(totalRecipeCost * 100) / 100}&cookType=${allowExtras ? 'ai_extras' : 'ai_inventory'}`);
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to cook');
     } finally {
@@ -202,17 +219,16 @@ export default function AICookScreen() {
     }
   };
 
-  const addUnavailableToShoppingList = () => {
+  const addUnavailableToShoppingList = async () => {
     if (!selectedRecipe) return;
-    const unavailable = selectedRecipe.ingredients.filter(i => !i.available);
+    const unavailable = selectedRecipe.ingredients.filter(i => !i.available && !boughtItems[i.name]);
     if (unavailable.length === 0) return;
 
-    addFromRecipe(unavailable.map(i => ({
-      name: i.name,
-      quantity: i.quantity - i.inInventory,
-      unit: i.unit,
-    })));
-    Alert.alert('Added', `${unavailable.length} items added to shopping list`);
+    await addFromRecipe(unavailable.map(i => {
+      const missing = i.quantity - i.inInventory;
+      return { name: i.name, quantity: missing > 0 ? Math.round(missing * 100) / 100 : i.quantity, unit: i.unit };
+    }));
+    Alert.alert('Added', `${unavailable.length} item${unavailable.length === 1 ? '' : 's'} added to your shopping list`);
   };
 
   return (
@@ -220,40 +236,40 @@ export default function AICookScreen() {
       <Stack.Screen options={{
         headerShown: true,
         title,
-        headerStyle: { backgroundColor: allowExtras ? theme.colors.tertiary : theme.colors.secondary },
-        headerTintColor: allowExtras ? theme.colors.onTertiary : theme.colors.onSecondary,
+        headerStyle: { backgroundColor: theme.colors.surface },
+        headerTintColor: theme.colors.onSurface,
+        headerShadowVisible: false,
       }} />
-      <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]} contentContainerStyle={styles.content}>
+      <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {!selectedRecipe ? (
           <>
-            {/* Difficulty Slider */}
-            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-              <Card.Content>
-                <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>Difficulty Level</Text>
-                <View style={styles.sliderRow}>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
-                    <Chip
-                      key={i}
-                      selected={difficulty === i}
-                      onPress={() => setDifficulty(i)}
-                      compact
-                      style={[styles.diffChip, difficulty === i && { backgroundColor: theme.colors.primaryContainer }]}
-                      textStyle={difficulty === i ? { color: theme.colors.primary, fontWeight: '700' } : undefined}
-                    >
-                      {i}
-                    </Chip>
-                  ))}
-                </View>
-                <Text variant="bodySmall" style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}>
-                  {difficulty <= 3 ? 'Easy — Quick & simple recipes' :
-                   difficulty <= 6 ? 'Medium — Some skill required' :
-                   'Hard — Complex, time-intensive dishes'}
+            {useUpMode && expiringSoon.length > 0 ? (
+              <View style={[styles.useUpBanner, { backgroundColor: theme.colors.secondaryContainer }]}>
+                <MaterialCommunityIcons name="timer-sand" size={20} color={theme.colors.secondary} />
+                <Text variant="bodyMedium" style={{ flex: 1, marginLeft: 10, color: theme.colors.onSecondaryContainer, lineHeight: 20 }}>
+                  Recipes will use up: <Text style={{ fontWeight: '700', color: theme.colors.onSecondaryContainer }}>{expiringSoon.map(i => i.name).join(', ')}</Text>
                 </Text>
+              </View>
+            ) : null}
+
+            {/* Difficulty */}
+            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} mode="contained">
+              <Card.Content>
+                <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>How much effort?</Text>
+                <ChoiceChips
+                  options={[
+                    { value: 2, label: 'Quick & easy' },
+                    { value: 5, label: 'Some skill' },
+                    { value: 8, label: 'Go all out' },
+                  ]}
+                  value={difficulty <= 3 ? 2 : difficulty <= 6 ? 5 : 8}
+                  onChange={setDifficulty}
+                />
               </Card.Content>
             </Card>
 
             {/* Servings */}
-            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} mode="contained">
               <Card.Content>
                 <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>Servings</Text>
                 <View style={styles.servingsRow}>
@@ -265,19 +281,19 @@ export default function AICookScreen() {
             </Card>
 
             {/* Inventory Summary */}
-            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} mode="contained">
               <Card.Content>
                 <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
-                  Your Inventory ({inventory.length} items)
+                  Cooking from {usable.length} item{usable.length === 1 ? '' : 's'}
                 </Text>
                 <View style={styles.chipRow}>
-                  {inventory.slice(0, 10).map(item => (
+                  {usable.slice(0, 10).map(item => (
                     <Chip key={item.id} compact style={[styles.invChip, { backgroundColor: theme.colors.surfaceVariant }]}>
-                      {item.name} ({item.quantity}{item.unit})
+                      {item.name} ({formatAmount(item.quantity, item.unit)})
                     </Chip>
                   ))}
-                  {inventory.length > 10 && (
-                    <Chip compact style={[styles.invChip, { backgroundColor: theme.colors.surfaceVariant }]}>+{inventory.length - 10} more</Chip>
+                  {usable.length > 10 && (
+                    <Chip compact style={[styles.invChip, { backgroundColor: theme.colors.surfaceVariant }]}>+{usable.length - 10} more</Chip>
                   )}
                 </View>
               </Card.Content>
@@ -289,16 +305,19 @@ export default function AICookScreen() {
               loading={isLoading}
               disabled={isLoading}
               style={styles.suggestButton}
-              icon="robot"
+              contentStyle={{ paddingVertical: 8 }}
+              labelStyle={{ fontSize: 16, fontWeight: '700' }}
+              icon="creation"
             >
-              {isLoading ? 'Finding Recipes...' : 'Get AI Suggestions'}
+              {isLoading ? 'Finding recipes…' : suggestions.length > 0 ? 'Suggest different recipes' : 'Suggest recipes'}
             </Button>
 
             {/* Results */}
             {suggestions.map((recipe, index) => (
               <Card
                 key={index}
-                style={[styles.recipeCard, { backgroundColor: theme.colors.surface, borderLeftColor: theme.colors.primary }]}
+                style={[styles.recipeCard, { backgroundColor: theme.colors.surface }]}
+                mode="contained"
                 onPress={() => handleSelectRecipe(recipe)}
               >
                 <Card.Content>
@@ -319,7 +338,7 @@ export default function AICookScreen() {
                     <Chip compact icon="signal">Lvl {recipe.difficulty}</Chip>
                     <Chip compact icon="cash">{currency}{recipe.estimated_cost.toFixed(2)}</Chip>
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                     <Chip compact icon="fire">{recipe.servings ? Math.round(recipe.calories / recipe.servings) : recipe.calories} cal/serving</Chip>
                     <Chip compact icon="arm-flex">{recipe.servings ? Math.round(recipe.protein_grams / recipe.servings) : recipe.protein_grams}g protein/serving</Chip>
                   </View>
@@ -355,7 +374,7 @@ export default function AICookScreen() {
             <Text variant="headlineSmall" style={[styles.recipeTitleLarge, { color: theme.colors.onSurface }]}>{selectedRecipe.name}</Text>
             <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 16 }}>{selectedRecipe.description}</Text>
 
-            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
               <Chip compact icon="fire">{selectedRecipe.servings ? Math.round(selectedRecipe.calories / selectedRecipe.servings) : selectedRecipe.calories} cal/serving</Chip>
               <Chip compact icon="arm-flex">{selectedRecipe.servings ? Math.round(selectedRecipe.protein_grams / selectedRecipe.servings) : selectedRecipe.protein_grams}g protein/serving</Chip>
             </View>
@@ -370,7 +389,7 @@ export default function AICookScreen() {
               </Text>
             )}
 
-            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} mode="contained">
               <Card.Content>
                 <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>Ingredients</Text>
                 {selectedRecipe.ingredients.map((ing, i) => (
@@ -381,7 +400,8 @@ export default function AICookScreen() {
                       color={ing.available || boughtItems[ing.name] ? theme.colors.primary : theme.colors.tertiary}
                     />
                     <Text variant="bodyMedium" style={[styles.ingredientText, { flex: 1, color: theme.colors.onSurface }]}>
-                      {ing.name} — {ing.quantity} {ing.unit}
+                      {ing.name} — {formatQty(ing.quantity)} {ing.unit}
+                      {!ing.available && ing.inInventory > 0 ? ` (have ${formatQty(ing.inInventory)})` : ''}
                     </Text>
                     {!ing.available && !boughtItems[ing.name] && (
                       <Button mode="outlined" compact onPress={() => handleBuyItem(ing)}>
@@ -409,8 +429,10 @@ export default function AICookScreen() {
 
             <Button
               mode="contained"
-              onPress={handleCookRecipe}
+              onPress={() => handleCookRecipe()}
               style={styles.cookButton}
+              contentStyle={{ paddingVertical: 8 }}
+              labelStyle={{ fontSize: 16, fontWeight: '700' }}
               icon="pot-steam"
               disabled={isCooking}
               loading={isCooking}
@@ -440,8 +462,8 @@ export default function AICookScreen() {
           <TextInput
             label="Quantity"
             value={buyQuantity}
-            onChangeText={setBuyQuantity}
-            keyboardType="numeric"
+            onChangeText={v => setBuyQuantity(v.replace(',', '.').replace(/[^\d.]/g, ''))}
+            keyboardType="decimal-pad"
             mode="outlined"
             style={{ marginBottom: 16 }}
           />
@@ -458,7 +480,8 @@ export default function AICookScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
-  card: { marginBottom: 12, borderRadius: 16, elevation: 1 },
+  card: { marginBottom: 12, borderRadius: 20 },
+  useUpBanner: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 16, marginBottom: 12 },
   sectionTitle: { fontWeight: '700', marginBottom: 12 },
   sliderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   diffChip: { minWidth: 40 },
@@ -466,15 +489,15 @@ const styles = StyleSheet.create({
   servingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   invChip: {},
-  suggestButton: { marginVertical: 16, borderRadius: 12 },
-  recipeCard: { marginBottom: 12, borderRadius: 16, borderLeftWidth: 4, elevation: 1 },
+  suggestButton: { marginVertical: 12, borderRadius: 16 },
+  recipeCard: { marginBottom: 12, borderRadius: 20 },
   recipeHeader: { flexDirection: 'row', alignItems: 'center' },
   matchBadge: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
   matchText: { fontWeight: '700', fontSize: 13 },
-  metaRow: { flexDirection: 'row', gap: 6 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   missingRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, padding: 8, borderRadius: 8 },
   recipeTitleLarge: { fontWeight: '700', marginBottom: 4 },
   ingredientRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 8, borderBottomWidth: 1 },
   ingredientText: { marginLeft: 4 },
-  cookButton: { marginTop: 16, borderRadius: 12 },
+  cookButton: { marginTop: 16, borderRadius: 16 },
 });

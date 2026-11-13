@@ -295,6 +295,13 @@ export async function getDatabase(): Promise<Database> {
     );
   `);
 
+  // Columns added after the first release. ALTER fails harmlessly once the column exists.
+  try {
+    await nativeDb.execAsync('ALTER TABLE inventory_items ADD COLUMN is_frozen INTEGER DEFAULT 0');
+  } catch {
+    // Column already there.
+  }
+
   // Wrap native db to match our interface
   db = {
     getAllAsync: <T>(sql: string, params?: any[]) => nativeDb.getAllAsync<T>(sql, params || []),

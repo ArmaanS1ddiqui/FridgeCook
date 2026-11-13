@@ -5,7 +5,8 @@ import { StatusBar } from 'expo-status-bar';
 import { lightTheme, darkTheme } from '../src/constants/theme';
 import { getDatabase } from '../src/database/schema';
 import { useSettingsStore } from '../src/stores/settingsStore';
-import { View, ActivityIndicator, StyleSheet, useColorScheme, Platform } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, useColorScheme, Platform, AppState } from 'react-native';
+import { runAutoBackup } from '../src/services/autoBackup';
 import * as Updates from 'expo-updates';
 
 async function checkForUpdates() {
@@ -30,10 +31,20 @@ export default function RootLayout() {
     Promise.all([
       getDatabase(),
       loadSettings(),
-    ]).then(() => setDbReady(true));
+    ]).then(() => {
+      setDbReady(true);
+      // Catch up on anything that changed before the app was last closed.
+      runAutoBackup().catch(() => {});
+    });
+
+    // Refresh the automatic backup whenever the app is put away.
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'background' || state === 'inactive') runAutoBackup().catch(() => {});
+    });
 
     // Check for OTA updates on every app launch
     checkForUpdates();
+    return () => subscription.remove();
   }, []);
 
   const isDark =

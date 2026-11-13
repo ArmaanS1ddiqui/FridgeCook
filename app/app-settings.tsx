@@ -189,7 +189,7 @@ export default function AppSettingsScreen() {
               Select your preferred supermarket for price references
             </Text>
             {DUBAI_SUPERMARKETS.map(s => (
-              <View key={s.id} style={[styles.radioRow, { borderBottomColor: theme.colors.outline }]}>
+              <View key={s.id} style={[styles.radioRow, { borderBottomColor: theme.colors.outlineVariant }]}>
                 <RadioButton.Android
                   value={s.id}
                   status={supermarket === s.id ? 'checked' : 'unchecked'}
@@ -359,7 +359,7 @@ export default function AppSettingsScreen() {
                 />
               }
               style={styles.input}
-              outlineColor={theme.colors.outline}
+              outlineColor={theme.colors.outlineVariant}
               activeOutlineColor={theme.colors.primary}
             />
             <View style={styles.buttonRow}>
@@ -389,7 +389,7 @@ export default function AppSettingsScreen() {
             </View>
             <RadioButton.Group onValueChange={(value) => { setSelectedModel(value); showConfirmation('AI model updated'); }} value={selectedModel}>
               {AVAILABLE_MODELS.map(model => (
-                <View key={model.id} style={[styles.radioRow, { borderBottomColor: theme.colors.outline }]}>
+                <View key={model.id} style={[styles.radioRow, { borderBottomColor: theme.colors.outlineVariant }]}>
                   <RadioButton.Android value={model.id} color={theme.colors.primary} />
                   <View style={{ flex: 1 }}>
                     <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>{model.name}</Text>

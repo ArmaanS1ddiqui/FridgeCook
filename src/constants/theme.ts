@@ -1,105 +1,101 @@
 import { MD3LightTheme, MD3DarkTheme } from 'react-native-paper';
 
-export const CATEGORIES = [
-  'Protein', 'Dairy', 'Vegetable', 'Fruit', 'Grain',
-  'Spice', 'Beverage', 'Snack', 'Condiment', 'Frozen', 'Other',
-] as const;
+export { CATEGORIES, UNITS, COMMON_UNITS, CATEGORY_ICONS, CATEGORY_COLORS } from './catalog';
 
-export const UNITS = [
-  'pcs', 'g', 'kg', 'mg', 'ml', 'L', 'cup', 'tbsp', 'tsp', 'oz', 'lb', 'dozen', '%',
-] as const;
-
-export const CATEGORY_ICONS: Record<string, string> = {
-  Protein: 'food-drumstick',
-  Dairy: 'cheese',
-  Vegetable: 'carrot',
-  Fruit: 'fruit-cherries',
-  Grain: 'bread-slice',
-  Spice: 'shaker',
-  Beverage: 'cup',
-  Snack: 'cookie',
-  Condiment: 'bottle-soda',
-  Frozen: 'snowflake',
-  Other: 'package-variant',
-};
-
-export const CATEGORY_COLORS: Record<string, string> = {
-  Protein: '#EF5350',
-  Dairy: '#FFA726',
-  Vegetable: '#66BB6A',
-  Fruit: '#EC407A',
-  Grain: '#D4A574',
-  Spice: '#FF7043',
-  Beverage: '#42A5F5',
-  Snack: '#AB47BC',
-  Condiment: '#26A69A',
-  Frozen: '#26C6DA',
-  Other: '#78909C',
-};
-
-const sharedColors = {
-  primary: '#4CAF50',
-  secondary: '#FF9800',
-  tertiary: '#2196F3',
-  error: '#EF5350',
-};
+// Amber used for "use soon" warnings in both themes.
+export const WARNING_COLOR = '#F5A524';
+// Darker amber for light backgrounds, where the bright one is unreadable as text.
+export const WARNING_COLOR_LIGHT = '#A86400';
 
 export const lightTheme = {
   ...MD3LightTheme,
   colors: {
     ...MD3LightTheme.colors,
-    ...sharedColors,
-    primaryContainer: '#C8E6C9',
-    secondaryContainer: '#FFE0B2',
-    tertiaryContainer: '#BBDEFB',
+    primary: '#1E8E4E',
+    onPrimary: '#FFFFFF',
+    primaryContainer: '#D5F2E0',
+    onPrimaryContainer: '#0B3D21',
+    secondary: '#D97F00',
+    onSecondary: '#FFFFFF',
+    secondaryContainer: '#FFE8C7',
+    onSecondaryContainer: '#4A2B00',
+    tertiary: '#1F78D1',
+    onTertiary: '#FFFFFF',
+    tertiaryContainer: '#D8EAFB',
+    onTertiaryContainer: '#0A2F54',
+    error: '#D64545',
+    onError: '#FFFFFF',
+    errorContainer: '#FBDCDC',
+    onErrorContainer: '#5C1414',
+    background: '#F4F6F3',
+    onBackground: '#151A17',
     surface: '#FFFFFF',
-    surfaceVariant: '#F5F5F5',
-    background: '#F8F9FA',
-    onSurface: '#1A1A1A',
-    onSurfaceVariant: '#666666',
-    onBackground: '#1A1A1A',
-    outline: '#E0E0E0',
-    errorContainer: '#FFCDD2',
+    onSurface: '#151A17',
+    surfaceVariant: '#ECF0EB',
+    onSurfaceVariant: '#5E6964',
+    // outline = input/button borders (needs to be visible); outlineVariant = card borders and dividers.
+    outline: '#8D9991',
+    outlineVariant: '#D3DAD3',
+    inverseSurface: '#232A26',
+    inverseOnSurface: '#F1F4F1',
+    inversePrimary: '#7BDCA0',
+    backdrop: 'rgba(10, 16, 13, 0.45)',
     elevation: {
       ...MD3LightTheme.colors.elevation,
       level0: 'transparent',
       level1: '#FFFFFF',
-      level2: '#F5F5F5',
-      level3: '#EEEEEE',
-      level4: '#E0E0E0',
-      level5: '#D6D6D6',
+      level2: '#FFFFFF',
+      level3: '#FFFFFF',
+      level4: '#F7F9F6',
+      level5: '#F1F4F0',
     },
   },
-  roundness: 16,
+  roundness: 14,
 };
 
 export const darkTheme = {
   ...MD3DarkTheme,
   colors: {
     ...MD3DarkTheme.colors,
-    ...sharedColors,
-    primaryContainer: '#1B5E20',
-    secondaryContainer: '#E65100',
-    tertiaryContainer: '#0D47A1',
-    surface: '#1E1E1E',
-    surfaceVariant: '#2A2A2A',
-    background: '#121212',
-    onSurface: '#E8E8E8',
-    onSurfaceVariant: '#AAAAAA',
-    onBackground: '#E8E8E8',
-    outline: '#333333',
-    errorContainer: '#B71C1C',
+    primary: '#5AD68B',
+    onPrimary: '#05301A',
+    primaryContainer: '#153D29',
+    onPrimaryContainer: '#B9F3D0',
+    secondary: '#FFB454',
+    onSecondary: '#3D2500',
+    secondaryContainer: '#4A3312',
+    onSecondaryContainer: '#FFE1B5',
+    tertiary: '#6EB7FF',
+    onTertiary: '#06284A',
+    tertiaryContainer: '#143450',
+    onTertiaryContainer: '#CDE5FF',
+    error: '#FF7373',
+    onError: '#4A0D0D',
+    errorContainer: '#4B1A1A',
+    onErrorContainer: '#FFD3D3',
+    background: '#0E1311',
+    onBackground: '#E9EEEA',
+    surface: '#171D1A',
+    onSurface: '#E9EEEA',
+    surfaceVariant: '#222A26',
+    onSurfaceVariant: '#A3AFA8',
+    outline: '#5B6A61',
+    outlineVariant: '#323D37',
+    inverseSurface: '#E9EEEA',
+    inverseOnSurface: '#1A211D',
+    inversePrimary: '#1E8E4E',
+    backdrop: 'rgba(0, 0, 0, 0.6)',
     elevation: {
       ...MD3DarkTheme.colors.elevation,
       level0: 'transparent',
-      level1: '#1E1E1E',
-      level2: '#232323',
-      level3: '#282828',
-      level4: '#2E2E2E',
-      level5: '#333333',
+      level1: '#171D1A',
+      level2: '#1C2320',
+      level3: '#212925',
+      level4: '#252E2A',
+      level5: '#2A332F',
     },
   },
-  roundness: 16,
+  roundness: 14,
 };
 
 export type AppTheme = typeof lightTheme;

@@ -92,9 +92,9 @@ export default function HistoryScreen() {
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <MaterialCommunityIcons name="history" size={80} color={theme.colors.outlineVariant} />
+            <MaterialCommunityIcons name="history" size={80} color={theme.colors.onSurfaceVariant} />
             <Text variant="titleMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 16 }}>No cooking history yet</Text>
-            <Text variant="bodyMedium" style={{ color: theme.colors.outlineVariant, marginTop: 4 }}>
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
               Start cooking to build your history!
             </Text>
           </View>

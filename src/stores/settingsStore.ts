@@ -143,7 +143,7 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  themeMode: 'dark',
+  themeMode: 'system',
   selectedModel: 'gemini-3.8-flash',
   currency: '$',
   supermarket: 'carrefour',
@@ -170,7 +170,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         await AsyncStorage.setItem('selected_model', resolvedModel);
       }
       set({
-        themeMode: (themeMode as ThemeMode) || 'dark',
+        themeMode: (themeMode as ThemeMode) || 'system',
         selectedModel: resolvedModel,
         currency: currency || '$',
         supermarket: supermarket || 'carrefour',

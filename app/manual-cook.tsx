@@ -7,6 +7,9 @@ import { useProfileStore } from '../src/stores/profileStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useSettingsStore } from '../src/stores/settingsStore';
+import { formatAmount } from '../src/utils/units';
+import { expiryStatus } from '../src/utils/expiry';
+import { NumberField, ExpiryPill } from '../src/components/ui';
 
 interface SelectedIngredient {
   item: InventoryItem;
@@ -43,12 +46,15 @@ export default function ManualCookScreen() {
   );
 
   const addIngredient = (item: InventoryItem) => {
-    setSelectedIngredients(prev => [...prev, { item, quantityUsed: item.quantity }]);
+    // Start from a sensible portion rather than the whole pack.
+    // Counted items start at 1; for weights and volumes the user types the amount.
+    const portion = item.unit === 'pcs' || item.unit === 'dozen' ? Math.min(1, item.quantity) : 0;
+    setSelectedIngredients(prev => [...prev, { item, quantityUsed: portion }]);
   };
 
   const updateQuantity = (itemId: string, quantity: number) => {
     setSelectedIngredients(prev => prev.map(s =>
-      s.item.id === itemId ? { ...s, quantityUsed: Math.max(0.01, Math.min(quantity, s.item.quantity)) } : s
+      s.item.id === itemId ? { ...s, quantityUsed: Math.max(0, Math.min(quantity, s.item.quantity)) } : s
     ));
   };
 
@@ -70,16 +76,21 @@ export default function ManualCookScreen() {
       Alert.alert('Error', 'Please select at least one ingredient');
       return;
     }
+    if (ratingTaste === 0) {
+      Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
+      return;
+    }
+    const used = selectedIngredients.filter(s => s.quantityUsed > 0);
+    if (used.length === 0) {
+      Alert.alert('Error', 'Enter how much of each ingredient you used');
+      return;
+    }
     setIsCooking(true);
     try {
-      if (ratingTaste === 0) {
-        Alert.alert('Rate Your Dish', 'Please rate the taste before saving');
-        return;
-      }
 
       // Consume ingredients from inventory (batch to avoid N+1 reloads)
       const { consumeItems } = useInventoryStore.getState();
-      await consumeItems(selectedIngredients.map(sel => ({ id: sel.item.id, quantity: sel.quantityUsed })));
+      await consumeItems(used.map(sel => ({ id: sel.item.id, quantity: sel.quantityUsed })));
 
       // Add cooking entry
       await addCookingEntry(
@@ -95,7 +106,7 @@ export default function ManualCookScreen() {
           notes: notes || null,
           recipe_id: null,
         },
-        selectedIngredients.map(s => ({
+        used.map(s => ({
           inventory_item_name: s.item.name,
           quantity_used: s.quantityUsed,
           unit: s.item.unit,
@@ -124,7 +135,7 @@ export default function ManualCookScreen() {
           <IconButton
             key={i}
             icon={i <= value ? 'star' : 'star-outline'}
-            iconColor={i <= value ? '#FFB300' : theme.colors.outlineVariant}
+            iconColor={i <= value ? '#FFB300' : theme.colors.onSurfaceVariant}
             size={32}
             onPress={() => onChange(i)}
           />
@@ -135,8 +146,8 @@ export default function ManualCookScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerShown: true, title: 'Manual Cook', headerStyle: { backgroundColor: theme.colors.primary }, headerTintColor: theme.colors.onPrimary }} />
-      <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]} contentContainerStyle={styles.content}>
+      <Stack.Screen options={{ headerShown: true, title: 'Log a Dish', headerStyle: { backgroundColor: theme.colors.surface }, headerTintColor: theme.colors.onSurface, headerShadowVisible: false }} />
+      <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {/* Progress indicator */}
         <View style={styles.progressRow}>
           {['ingredients', 'details', 'rating'].map((s, i) => (
@@ -159,7 +170,7 @@ export default function ManualCookScreen() {
             <Text variant="titleLarge" style={[styles.stepTitle, { color: theme.colors.onSurface }]}>Select Ingredients</Text>
 
             {selectedIngredients.length > 0 && (
-              <Card style={[styles.selectedCard, { backgroundColor: theme.colors.primaryContainer }]}>
+              <Card mode="contained" style={[styles.selectedCard, { backgroundColor: theme.colors.primaryContainer }]}>
                 <Card.Content>
                   <Text variant="titleSmall" style={{ marginBottom: 8, color: theme.colors.onPrimaryContainer }}>Selected ({selectedIngredients.length})</Text>
                   {selectedIngredients.map(sel => (
@@ -167,14 +178,14 @@ export default function ManualCookScreen() {
                       <View style={{ flex: 1 }}>
                         <Text variant="bodyMedium" style={{ fontWeight: '600', color: theme.colors.onPrimaryContainer }}>{sel.item.name}</Text>
                         <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                          Available: {sel.item.quantity} {sel.item.unit}
+                          Have {formatAmount(sel.item.quantity, sel.item.unit)}
                         </Text>
                       </View>
-                      <TextInput
-                        value={sel.quantityUsed.toString()}
-                        onChangeText={v => updateQuantity(sel.item.id, parseFloat(v) || 0)}
-                        keyboardType="numeric"
-                        mode="outlined"
+                      <NumberField
+                        value={sel.quantityUsed}
+                        onChangeValue={n => updateQuantity(sel.item.id, n)}
+                        max={sel.item.quantity}
+                        placeholder="0"
                         dense
                         style={styles.qtyInput}
                       />
@@ -200,13 +211,14 @@ export default function ManualCookScreen() {
             />
 
             {filteredItems.map(item => (
-              <Card key={item.id} style={[styles.ingredientCard, { backgroundColor: theme.colors.surface }]} onPress={() => addIngredient(item)}>
+              <Card mode="contained" key={item.id} style={[styles.ingredientCard, { backgroundColor: theme.colors.surface }]} onPress={() => addIngredient(item)}>
                 <Card.Content style={styles.ingredientContent}>
                   <View style={{ flex: 1 }}>
                     <Text variant="bodyMedium" style={{ fontWeight: '600', color: theme.colors.onSurface }}>{item.name}</Text>
                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                      {item.quantity} {item.unit} • {item.category}
+                      {formatAmount(item.quantity, item.unit)} • {item.category}
                     </Text>
+                    {expiryStatus(item.expiry_date) !== 'ok' ? <View style={{ marginTop: 4 }}><ExpiryPill date={item.expiry_date} compact /></View> : null}
                   </View>
                   <MaterialCommunityIcons name="plus-circle" size={28} color={theme.colors.primary} />
                 </Card.Content>
@@ -240,7 +252,7 @@ export default function ManualCookScreen() {
               label="Servings"
               value={servings}
               onChangeText={setServings}
-              keyboardType="numeric"
+              keyboardType="number-pad"
               mode="outlined"
               style={styles.input}
             />
@@ -255,7 +267,7 @@ export default function ManualCookScreen() {
               style={styles.input}
             />
 
-            <Card style={[styles.costCard, { backgroundColor: theme.colors.primaryContainer }]}>
+            <Card mode="contained" style={[styles.costCard, { backgroundColor: theme.colors.primaryContainer }]}>
               <Card.Content style={{ alignItems: 'center' }}>
                 <Text variant="bodyMedium" style={{ color: theme.colors.onPrimaryContainer }}>Total Cost</Text>
                 <Text variant="headlineMedium" style={{ fontWeight: '700', color: theme.colors.primary }}>
@@ -280,7 +292,7 @@ export default function ManualCookScreen() {
           <>
             <Text variant="titleLarge" style={[styles.stepTitle, { color: theme.colors.onSurface }]}>Rate Your Dish</Text>
 
-            <Card style={[styles.ratingCard, { backgroundColor: theme.colors.surface }]}>
+            <Card mode="contained" style={[styles.ratingCard, { backgroundColor: theme.colors.surface }]}>
               <Card.Content>
                 <StarSelector value={ratingTaste} onChange={setRatingTaste} label="Taste" />
                 <StarSelector value={ratingEffort} onChange={setRatingEffort} label="Effort vs Result" />
@@ -309,17 +321,17 @@ const styles = StyleSheet.create({
   progressItem: { alignItems: 'center' },
   progressDot: { width: 12, height: 12, borderRadius: 6, marginBottom: 4 },
   stepTitle: { fontWeight: '700', marginBottom: 16 },
-  selectedCard: { marginBottom: 16, borderRadius: 16, elevation: 1 },
+  selectedCard: { marginBottom: 16, borderRadius: 18 },
   selectedRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  qtyInput: { width: 70, textAlign: 'center' },
+  qtyInput: { width: 84, textAlign: 'center' },
   searchInput: { marginBottom: 12 },
-  ingredientCard: { marginBottom: 6, borderRadius: 16, elevation: 1 },
+  ingredientCard: { marginBottom: 6, borderRadius: 18 },
   ingredientContent: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
   nextButton: { marginTop: 16, borderRadius: 12 },
   input: { marginBottom: 12 },
-  costCard: { marginVertical: 12, borderRadius: 16, elevation: 1 },
+  costCard: { marginVertical: 12, borderRadius: 18 },
   navButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 },
-  ratingCard: { marginBottom: 16, borderRadius: 16, elevation: 1 },
+  ratingCard: { marginBottom: 16, borderRadius: 18 },
   ratingSection: { marginBottom: 16 },
   ratingLabel: { fontWeight: '600', marginBottom: 4 },
   starsRow: { flexDirection: 'row' },
